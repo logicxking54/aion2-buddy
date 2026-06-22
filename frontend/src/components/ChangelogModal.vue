@@ -1,0 +1,89 @@
+<script lang="ts" setup>
+import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t, locale } = useI18n()
+
+// Build-time app version (from wails.json's info.productVersion, injected by Vite).
+const appVersion = __APP_VERSION__
+
+// Changelog — newest first. Each change carries both languages so it follows the
+// active locale. Add a new release object at the TOP for each version bump.
+interface Change {
+  en: string
+  th: string
+}
+interface Release {
+  version: string
+  changes: Change[]
+}
+const releases: Release[] = [
+  { version: '1.0.3', changes: [{ en: 'Improved Ping Maker', th: 'ปรับปรุงฟีเจอร์ Ping Maker' }] },
+  { version: '1.0.2', changes: [{ en: 'Added Memory Reader', th: 'เพิ่มฟีเจอร์ Memory Reader' }] },
+  { version: '1.0.1', changes: [{ en: 'Added Caster Filter', th: 'เพิ่มฟีเจอร์ Caster Filter' }] },
+  { version: '1.0.0', changes: [{ en: 'Added Ping Maker', th: 'เพิ่มฟีเจอร์ Ping Maker' }] },
+]
+
+function changeText(c: Change) {
+  return locale.value === 'th' ? c.th : c.en
+}
+
+// Show once per version: remember the last version the user dismissed. After an
+// update (new version) the popup appears again so they see what changed.
+const SEEN_KEY = 'changelog-seen'
+const visible = ref(false)
+
+function close() {
+  localStorage.setItem(SEEN_KEY, appVersion)
+  visible.value = false
+}
+
+onMounted(() => {
+  if (localStorage.getItem(SEEN_KEY) !== appVersion) visible.value = true
+})
+</script>
+
+<template>
+  <div
+    v-if="visible"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
+    @click.self="close"
+  >
+    <div class="w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-ink-800 shadow-2xl">
+      <!-- Header -->
+      <div class="flex items-start justify-between border-b border-white/5 bg-ink-900/60 px-5 py-4">
+        <div>
+          <h2 class="flex items-center gap-2 text-base font-bold text-white">
+            <span>✨</span>{{ t('changelog.title') }}
+          </h2>
+          <p class="mt-0.5 text-xs text-slate-400">{{ t('changelog.subtitle') }}</p>
+        </div>
+        <span class="rounded-md bg-accent/15 px-2 py-1 text-xs font-bold text-accent">v{{ appVersion }}</span>
+      </div>
+
+      <!-- Release list -->
+      <div class="max-h-[60vh] space-y-4 overflow-y-auto px-5 py-4">
+        <div v-for="r in releases" :key="r.version">
+          <div class="mb-1.5 flex items-center gap-2">
+            <span class="text-sm font-bold text-white">v{{ r.version }}</span>
+            <span v-if="r.version === appVersion" class="rounded bg-emerald-400/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-emerald-300">New</span>
+          </div>
+          <ul class="space-y-1">
+            <li v-for="(c, i) in r.changes" :key="i" class="flex gap-2 text-sm text-slate-300">
+              <span class="text-accent">•</span><span>{{ changeText(c) }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="border-t border-white/5 px-5 py-4">
+        <button
+          type="button"
+          @click="close"
+          class="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-bold text-ink-900 transition hover:bg-accent-soft"
+        >{{ t('changelog.close') }}</button>
+      </div>
+    </div>
+  </div>
+</template>

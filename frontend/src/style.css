@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+    font-family: "Nunito";
+    font-style: normal;
+    font-weight: 400;
+    src: local(""),
+    url("assets/fonts/nunito-v16-latin-regular.woff2") format("woff2");
+}
+
+/* Global UI scale — all Tailwind sizes/spacing are rem-based, so lowering the
+   root font size shrinks text, buttons and spacing uniformly (16px = default). */
+html {
+    font-size: 13px;
+}
+
+html,
+body {
+    margin: 0;
+    height: 100%;
+}
+
+#app {
+    height: 100vh;
+}
+
+/* Hide the native number-input spinners (up/down steppers) */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+/* Slim, theme-matched scrollbars (rem so they scale with the UI) */
+*::-webkit-scrollbar {
+    width: 0.55rem;
+    height: 0.55rem;
+}
+*::-webkit-scrollbar-thumb {
+    background: #27384f;
+    border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: #38d6c4;
+}
