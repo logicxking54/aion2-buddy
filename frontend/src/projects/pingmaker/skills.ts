@@ -32,9 +32,14 @@ function slugify(name: string) {
 
 // Build the skill list from skills.data.json, guaranteeing unique ids.
 const seen = new Map<string, number>()
+type RawSkill = { name: string; skill_ids?: number[]; image_url?: string; class?: string | string[] } & Record<string, unknown>
 export const skills: Skill[] = (
-  skillData as Array<{ name: string; skill_ids?: number[]; image_url?: string; class?: string | string[] }>
+  skillData as RawSkill[]
 ).map((s) => {
+  if (import.meta.env.DEV && !Array.isArray(s.skill_ids)) {
+    const suspiciousKeys = Object.keys(s).filter((k) => /skill.*ids?/i.test(k) && k !== 'skill_ids')
+    console.warn(`[skills] ${s.name} has no skill_ids`, suspiciousKeys.length ? `; suspicious keys: ${suspiciousKeys.join(', ')}` : '')
+  }
   let id = slugify(s.name)
   const n = seen.get(id) ?? 0
   seen.set(id, n + 1)

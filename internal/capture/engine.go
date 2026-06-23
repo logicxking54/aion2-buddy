@@ -3,10 +3,13 @@
 package capture
 
 import (
+	"bufio"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -171,13 +174,14 @@ type Engine struct {
 	lastActAt     map[uint32]int64 // last 0x02 ACT time per skill id (guards 0x00 buff casts)
 	tracker       *entityTracker   // character-name filter ("only my skills")
 	reasm         streamReassembler
-	curPorts      map[int]struct{} // server/proxy ports of the active handle (for direction)
-	lastReqByConn map[int]int64    // client port -> last outbound time (ns), for RTT
-	lastReqPkt    map[int][]byte   // client port -> last outbound payload, for request decoding
-	autoMode      bool             // compute bonus from ping instead of per-skill field
-	autoBase      float64          // packet add at 0ms ping
-	autoPerMs     float64          // extra packet add per ms of ping
-	pingEWMA      float64          // smoothed ping (ms); written only by packet goroutine
+	tails         map[flowKey]flowTail // previous inbound bytes per server flow, for split cast recovery
+	curPorts      map[int]struct{}     // server/proxy ports of the active handle (for direction)
+	lastReqByConn map[int]int64        // client port -> last outbound time (ns), for RTT
+	lastReqPkt    map[int][]byte       // client port -> last outbound payload, for request decoding
+	autoMode      bool                 // compute bonus from ping instead of per-skill field
+	autoBase      float64              // packet add at 0ms ping
+	autoPerMs     float64              // extra packet add per ms of ping
+	pingEWMA      float64              // smoothed ping (ms); written only by packet goroutine
 	pingHasValue  bool
 	lastPingEmit  int64
 	inspect       bool              // packet inspector enabled
@@ -194,11 +198,15 @@ type Engine struct {
 	casterFilter  uint64            // engine-level caster filter: only this caster is processed; 0 = all
 	running       bool
 
-	stop      chan struct{}
-	ports     *portTracker
-	curHandle handle
-	handleMu  sync.Mutex
-	wg        sync.WaitGroup
+	stop       chan struct{}
+	ports      *portTracker
+	curHandle  handle
+	handleMu   sync.Mutex
+	missLogMu  sync.Mutex
+	auditLogMu sync.Mutex
+	auditCh    chan hellfireAuditEntry
+	auditWG    sync.WaitGroup
+	wg         sync.WaitGroup
 
 	modified uint64
 }
@@ -216,6 +224,7 @@ func NewEngine(emit func(event string, payload any)) *Engine {
 		recentUsed:    map[uint64]int64{},
 		lastActAt:     map[uint32]int64{},
 		tracker:       newEntityTracker(),
+		tails:         map[flowKey]flowTail{},
 		curPorts:      map[int]struct{}{},
 		lastReqByConn: map[int]int64{},
 		lastReqPkt:    map[int][]byte{},
@@ -225,6 +234,26 @@ func NewEngine(emit func(event string, payload any)) *Engine {
 }
 
 const inspectCap = 500 // stop emitting after this many messages until re-enabled
+
+const splitTailMax = 192
+
+type flowKey struct {
+	src int
+	dst int
+}
+
+type flowTail struct {
+	data    []byte
+	nextSeq uint32
+}
+
+type hellfireAuditEntry struct {
+	at          time.Time
+	event       string
+	payload     []byte
+	payloadLen  int
+	skillOffset int
+}
 
 // SetInspect enables/disables the packet inspector. all=true dumps every packet
 // in both directions; all=false dumps only packets where a skill cast (inbound)
@@ -506,6 +535,137 @@ func (e *Engine) fire(event string, payload any) {
 
 func (e *Engine) emitLog(msg string) { e.fire("capture:log", msg) }
 
+func missLogPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir = filepath.Join(dir, "aion2-buddy")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "pingmaker-misses.log"), nil
+}
+
+func hellfireAuditPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir = filepath.Join(dir, "aion2-buddy")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "pingmaker-hellfire-audit.log"), nil
+}
+
+func isHellfireName(name string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(name)), "hellfire")
+}
+
+func skipSpeedEditForStability(name string, id uint32) bool {
+	if !isHellfireName(name) {
+		return false
+	}
+	// Hellfire charge tier is encoded in the final decimal digit. Keep the guard
+	// centralized so unstable tiers can be disabled quickly after dungeon tests.
+	return false
+}
+
+func (e *Engine) resetHellfireAudit() (string, error) {
+	path, err := hellfireAuditPath()
+	if err != nil {
+		return "", err
+	}
+	e.auditLogMu.Lock()
+	defer e.auditLogMu.Unlock()
+	header := fmt.Sprintf("# Hellfire audit started %s\n", time.Now().Format(time.RFC3339Nano))
+	return path, os.WriteFile(path, []byte(header), 0o644)
+}
+
+func (e *Engine) startHellfireAuditWriter(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	e.auditCh = make(chan hellfireAuditEntry, 256)
+	e.auditWG.Add(1)
+	go func(ch <-chan hellfireAuditEntry) {
+		defer e.auditWG.Done()
+		defer f.Close()
+		w := bufio.NewWriterSize(f, 64*1024)
+		defer w.Flush()
+		for entry := range ch {
+			_, _ = fmt.Fprintf(w, "%s | %s | offset=%d len=%d saved=%d hex=%s\n",
+				entry.at.Format(time.RFC3339Nano), entry.event, entry.skillOffset,
+				entry.payloadLen, len(entry.payload), hex.EncodeToString(entry.payload))
+			_ = w.Flush()
+		}
+	}(e.auditCh)
+	return nil
+}
+
+func (e *Engine) stopHellfireAuditWriter() {
+	if e.auditCh == nil {
+		return
+	}
+	close(e.auditCh)
+	e.auditCh = nil
+	e.auditWG.Wait()
+}
+
+// auditHellfire writes a bounded packet snapshot for Hellfire only. This keeps
+// a full dungeon session small enough to inspect while retaining each request
+// and edit decision in chronological order.
+func (e *Engine) auditHellfire(event string, payload []byte, skillOffset int) {
+	const maxAuditPayload = 2048
+	snapshot := payload
+	if len(snapshot) > maxAuditPayload {
+		snapshot = snapshot[:maxAuditPayload]
+	}
+	entry := hellfireAuditEntry{
+		at:          time.Now(),
+		event:       event,
+		payload:     append([]byte(nil), snapshot...),
+		payloadLen:  len(payload),
+		skillOffset: skillOffset,
+	}
+	select {
+	case e.auditCh <- entry:
+	default:
+		// Diagnostics must never delay packet reinjection.
+	}
+}
+
+// emitMiss writes only failed edits to disk. Packet hex is included so rare
+// layouts can be reproduced without enabling the high-volume inspector.
+func (e *Engine) emitMiss(msg string, payload []byte, skillOffset int) {
+	e.emitLog(msg)
+	if !strings.Contains(strings.ToLower(msg), "hellfire") {
+		return
+	}
+	path, err := missLogPath()
+	if err != nil {
+		e.emitLog("MISS log error: " + err.Error())
+		return
+	}
+	e.missLogMu.Lock()
+	defer e.missLogMu.Unlock()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		e.emitLog("MISS log error: " + err.Error())
+		return
+	}
+	_, writeErr := fmt.Fprintf(f, "%s | %s | offset=%d len=%d hex=%s\n",
+		time.Now().Format(time.RFC3339Nano), msg, skillOffset, len(payload), hex.EncodeToString(payload))
+	closeErr := f.Close()
+	if writeErr != nil {
+		e.emitLog("MISS log error: " + writeErr.Error())
+	} else if closeErr != nil {
+		e.emitLog("MISS log error: " + closeErr.Error())
+	}
+}
+
 // SetConfig rebuilds the speed lookup (and a config-only scan fallback) from
 // the UI config.
 func (e *Engine) SetConfig(skills []SkillSpeed) {
@@ -591,10 +751,18 @@ func (e *Engine) Start(skills []SkillSpeed) error {
 	e.pingHasValue = false
 	e.lastPingEmit = 0
 	e.reasm.reset()
+	e.tails = map[flowKey]flowTail{}
 	atomic.StoreUint64(&e.modified, 0)
 	e.mu.Unlock()
 
 	e.SetConfig(skills)
+	auditPath := ""
+	if path, err := e.resetHellfireAudit(); err == nil {
+		auditPath = path
+		e.emitLog("Hellfire audit: " + path)
+	} else {
+		e.emitLog("Hellfire audit error: " + err.Error())
+	}
 
 	if err := prepareDriver(); err != nil {
 		e.fire("capture:error", "Driver setup failed: "+err.Error())
@@ -603,6 +771,11 @@ func (e *Engine) Start(skills []SkillSpeed) error {
 		e.running = false
 		e.mu.Unlock()
 		return err
+	}
+	if auditPath != "" {
+		if err := e.startHellfireAuditWriter(auditPath); err != nil {
+			e.emitLog("Hellfire audit error: " + err.Error())
+		}
 	}
 
 	e.ports = newPortTracker()
@@ -643,6 +816,7 @@ func (e *Engine) Stop() {
 		pt.stopTracking()
 	}
 	e.wg.Wait()
+	e.stopHellfireAuditWriter()
 }
 
 // IsRunning reports whether capture is active.
@@ -696,6 +870,7 @@ func (e *Engine) interceptLoop() {
 			portSet[p] = struct{}{}
 		}
 		e.curPorts = portSet
+		e.tails = map[flowKey]flowTail{}
 
 		switch {
 		case len(ports) == 0:
@@ -779,6 +954,19 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		now := time.Now().UnixNano()
 		e.lastReqByConn[srcPort] = now                          // last outbound time on this connection
 		e.lastReqPkt[srcPort] = append([]byte(nil), payload...) // copy, for pairing/decoding
+		requestHits := findAllSkillIDs(payload, scanIDs, scanFB, 0)
+		seenHellfire := map[uint32]struct{}{}
+		for _, hit := range requestHits {
+			name := idToName[hit.id]
+			if !isHellfireName(name) {
+				continue
+			}
+			if _, duplicate := seenHellfire[hit.id]; duplicate {
+				continue
+			}
+			seenHellfire[hit.id] = struct{}{}
+			e.auditHellfire(fmt.Sprintf("REQUEST name=%q id=%d", name, hit.id), payload, hit.offset)
+		}
 		if len(e.lastReqByConn) > 256 {
 			for k, t := range e.lastReqByConn {
 				if now-t > int64(30*time.Second) {
@@ -794,8 +982,8 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		if inspect {
 			if inspectAll {
 				e.emitInspect(payload, "outbound", -1)
-			} else if hits := findAllSkillIDs(payload, scanIDs, scanFB, 0); len(hits) > 0 {
-				h0 := hits[0]
+			} else if len(requestHits) > 0 {
+				h0 := requestHits[0]
 				name := idToName[h0.id]
 				if name == "" {
 					name = fmt.Sprintf("ID:%d", h0.id)
@@ -810,6 +998,13 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	}
 
 	// Inbound (server → client): the modifiable / loggable stream.
+	key := flowKey{src: srcPort, dst: dstPort}
+	if seq, seqOK := tcpSequence(raw); seqOK {
+		defer e.updateSplitTail(key, payload, seq)
+		if e.recoverSplitCasts(raw, payload, payloadOffset, key, seq, scanIDs, scanFB, lookup, idToName, autoMode, autoBase, autoPerMs, casterFilter) {
+			modified = true
+		}
+	}
 	if len(payload) < 40 {
 		return
 	}
@@ -841,7 +1036,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	}
 
 	filtering := e.tracker.isConfigured()
-	rtt := ""       // response-time string for log lines; set on our first own ACT
 	pinged := false // ping is measured once per packet, on our own 0x02 cast
 
 	// Process EVERY cast in the packet — rapid combos coalesce several skill
@@ -929,8 +1123,8 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			continue
 		}
 
-		// Caster (player/entity) suffix for every log line.
-		casterOnly := fmt.Sprintf(" [caster %d]", caster)
+		// Caster (entity) + skill id suffix for every log line.
+		casterOnly := fmt.Sprintf(" [caster:%d, id:%d]", caster, hh.id)
 
 		cfg, isConfigured := lookup[hh.id]
 		name := idToName[hh.id]
@@ -949,7 +1143,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			if t, ok := e.lastReqByConn[dstPort]; ok {
 				ms := int((now - t) / int64(time.Millisecond))
 				if ms > 0 && ms <= 3000 {
-					rtt = fmt.Sprintf(" (%dms)", ms)
 					e.updatePing(ms)
 				}
 				// Pair the outbound request with the cast it produced so we can
@@ -989,9 +1182,9 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		// record), so applying it to raw afterward is still correct.
 		var spdOff, spdLen int
 		var spdVal uint64
-		var isFloat, spdFound bool
+		var isFloat, spdFound, spdFallback bool
 		if isConfigured {
-			spdOff, spdLen, spdVal, isFloat, spdFound = findAttackSpeedOffset(payload, hh.offset)
+			spdOff, spdLen, spdVal, isFloat, spdFound, spdFallback = findAttackSpeedOffset(payload, hh.offset)
 		}
 
 		// Combo-chain test: rewrite this cast's trailing record
@@ -1079,12 +1272,28 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			}
 		}
 
+		// Diagnostic: mark edits that the fixed parser missed and the fallback
+		// scanner recovered, so a dense-fight log shows how much load the fallback
+		// is carrying (lots of "(fb)" => the standard layout is breaking).
+		if isConfigured && spdFound && spdFallback {
+			casterStr += " (fb)"
+		}
+
 		// Modify configured skills' combat speed (using the speed field located
 		// on the original packet above).
 		if isConfigured {
+			if skipSpeedEditForStability(name, hh.id) {
+				if isHellfireName(name) && is02 {
+					e.auditHellfire(fmt.Sprintf("SKIP_STABILITY name=%q id=%d caster=%d", name, hh.id, caster), payload, hh.offset)
+				}
+				continue
+			}
 			if spdFound && spdVal >= 10000 {
 				rawOff := payloadOffset + spdOff
 				if cfg.brk {
+					if isHellfireName(name) {
+						e.auditHellfire(fmt.Sprintf("EDIT name=%q id=%d speed=%d target=break float=%t fallback=%t caster=%d", name, hh.id, spdVal, isFloat, spdFallback, caster), payload, hh.offset)
+					}
 					// "Break" = max out the speed. Charge skills store a float
 					// (value/10000), so write the largest in-range float there;
 					// varint skills get the classic all-0xFF fill.
@@ -1097,7 +1306,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 					}
 					modified = true
 					e.countModify()
-					e.emitLog(fmt.Sprintf("ACT %s spd:%d -> break%s%s", name, spdVal, rtt, casterStr))
+					e.emitLog(fmt.Sprintf("ACT %s spd:%d -> break%s", name, spdVal, casterStr))
 					continue
 				}
 				// Bonus added on top of the skill's existing speed: from the
@@ -1112,6 +1321,9 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 					added = uint64(a + 0.5)
 				}
 				target := spdVal + added
+				if isHellfireName(name) {
+					e.auditHellfire(fmt.Sprintf("EDIT name=%q id=%d speed=%d add=%d target=%d float=%t fallback=%t caster=%d", name, hh.id, spdVal, added, target, isFloat, spdFallback, caster), payload, hh.offset)
+				}
 				// Charge skills (e.g. Hellfire) carry the speed as a 4-byte float
 				// holding value/10000 — write it back in the same form.
 				if isFloat {
@@ -1121,7 +1333,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 					binary.LittleEndian.PutUint32(raw[rawOff:rawOff+4], math.Float32bits(float32(float64(target)/10000.0)))
 					modified = true
 					e.countModify()
-					e.emitLog(fmt.Sprintf("ACT %s spd:%d +%d -> %d (float)%s%s", name, spdVal, added, target, rtt, casterStr))
+					e.emitLog(fmt.Sprintf("ACT %s spd:%d +%d -> %d%s", name, spdVal, added, target, casterStr))
 					continue
 				}
 				encoded := encodeVarintFixed(target, spdLen)
@@ -1133,14 +1345,37 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 					copy(raw[rawOff:rawOff+spdLen], encodeVarintFixed(target, spdLen))
 					modified = true
 					e.countModify()
-					e.emitLog(fmt.Sprintf("ACT %s spd:%d +%d -> capped%s%s", name, spdVal, added, rtt, casterStr))
+					e.emitLog(fmt.Sprintf("ACT %s spd:%d +%d -> capped%s", name, spdVal, added, casterStr))
 					continue
 				}
 				copy(raw[rawOff:rawOff+spdLen], encoded)
 				modified = true
 				e.countModify()
-				e.emitLog(fmt.Sprintf("ACT %s spd:%d +%d -> %d%s%s", name, spdVal, added, target, rtt, casterStr))
+				e.emitLog(fmt.Sprintf("ACT %s spd:%d +%d -> %d%s", name, spdVal, added, target, casterStr))
 				continue
+			}
+		}
+
+		// Diagnostic: a configured skill's real 0x02 cast that we could NOT edit.
+		// Distinguish the two root causes so the log says which fix is needed:
+		//   truncated/segmented — the speed field can't physically fit in what's
+		//     left of this packet, i.e. the cast was split across TCP segments
+		//     (needs a carry-over buffer; widening the scanner can't help).
+		//   layout-unparsed — the record is fully present but neither the fixed
+		//     parser nor the fallback walked it (improve findSpeedSearch).
+		if isConfigured && is02 && !spdFound {
+			reason := "layout-unparsed"
+			if hh.offset+6+16+4 > len(payload) {
+				reason = "truncated/segmented"
+			}
+			e.emitMiss(fmt.Sprintf("MISS %s (%s)%s", name, reason, casterStr), payload, hh.offset)
+		}
+		if isConfigured && is02 && isHellfireName(name) {
+			switch {
+			case !spdFound:
+				e.auditHellfire(fmt.Sprintf("NO_SPEED name=%q id=%d caster=%d", name, hh.id, caster), payload, hh.offset)
+			case spdVal < 10000:
+				e.auditHellfire(fmt.Sprintf("LOW_SPEED name=%q id=%d speed=%d float=%t fallback=%t caster=%d", name, hh.id, spdVal, isFloat, spdFallback, caster), payload, hh.offset)
 			}
 		}
 
@@ -1150,18 +1385,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			tick = payload[hh.offset+4]
 		}
 		if e.shouldLogUsed(hh.id, tick) {
-			// Diagnostic: explain why this cast didn't take the ACT (speed-edit)
-			// path, so a "Used" with no "ACT" can be told apart at a glance.
-			why := ""
-			switch {
-			case !isConfigured:
-				why = fmt.Sprintf(" [not configured id:%d 0x%02x]", hh.id, b6(payload, hh.offset))
-			case !spdFound:
-				why = fmt.Sprintf(" [configured but no speed field 0x%02x]", b6(payload, hh.offset))
-			default:
-				why = fmt.Sprintf(" [spd:%d <10000]", spdVal)
-			}
-			e.emitLog("Used " + name + rtt + casterStr + why)
+			e.emitLog("Used " + name + casterStr)
 		}
 	}
 }
@@ -1170,13 +1394,157 @@ func (e *Engine) countModify() {
 	e.fire("capture:count", atomic.AddUint64(&e.modified, 1))
 }
 
-// b6 returns the action byte (payload[off+5]) of a cast hit, or 0 if out of
-// range. 0x02 = damage/ACT cast, 0x00 = buff/instant. Used only for diagnostics.
-func b6(payload []byte, off int) byte {
-	if off+5 < len(payload) {
-		return payload[off+5]
+func (e *Engine) updateSplitTail(key flowKey, payload []byte, seq uint32) {
+	if len(payload) == 0 {
+		return
 	}
-	return 0
+	if e.tails == nil {
+		e.tails = map[flowKey]flowTail{}
+	}
+	prev := e.tails[key]
+	if len(prev.data) == 0 || prev.nextSeq != seq {
+		prev.data = append(prev.data[:0], payload...)
+	} else {
+		prev.data = append(prev.data, payload...)
+	}
+	if len(prev.data) > splitTailMax {
+		start := len(prev.data) - splitTailMax
+		prev.data = append(prev.data[:0], prev.data[start:]...)
+	}
+	prev.nextSeq = seq + uint32(len(payload))
+	e.tails[key] = prev
+	if len(e.tails) > 64 {
+		for k := range e.tails {
+			if k != key {
+				delete(e.tails, k)
+				if len(e.tails) <= 64 {
+					break
+				}
+			}
+		}
+	}
+}
+
+// recoverSplitCasts edits a configured cast whose skill id landed in the
+// previous TCP segment while its speed field landed in this segment. Because the
+// edit is same-length and only touches bytes in the current packet, TCP sequence
+// numbers and packet sizes remain unchanged.
+func (e *Engine) recoverSplitCasts(raw []byte, payload []byte, payloadOffset int, key flowKey, seq uint32, scanIDs map[uint32]struct{}, scanFB map[byte]struct{}, lookup map[uint32]skillCfg, idToName map[uint32]string, autoMode bool, autoBase, autoPerMs float64, casterFilter uint64) bool {
+	state := e.tails[key]
+	tail := state.data
+	if len(tail) == 0 || len(payload) == 0 || state.nextSeq != seq {
+		return false
+	}
+	combined := make([]byte, 0, len(tail)+len(payload))
+	combined = append(combined, tail...)
+	combined = append(combined, payload...)
+	hits := findAllSkillIDs(combined, scanIDs, scanFB, 0)
+	if len(hits) == 0 {
+		return false
+	}
+
+	modified := false
+	tailLen := len(tail)
+	for _, hh := range hits {
+		if hh.offset >= tailLen || hh.offset+5 >= len(combined) {
+			continue
+		}
+		if !hh.prefixOK || combined[hh.offset+5] != 0x02 {
+			continue
+		}
+		cfg, isConfigured := lookup[hh.id]
+		if !isConfigured {
+			continue
+		}
+		caster := extractEntityKey(combined, hh.offset)
+		if e.tracker.isConfigured() && (caster == 0 || !e.tracker.isMine(caster)) {
+			continue
+		}
+		if casterFilter != 0 && caster != 0 && caster != casterFilter {
+			continue
+		}
+		spdOff, spdLen, spdVal, isFloat, spdFound, spdFallback := findAttackSpeedOffset(combined, hh.offset)
+		if !spdFound || spdVal < 10000 {
+			continue
+		}
+		if spdOff < tailLen || spdOff+spdLen > len(combined) {
+			continue
+		}
+		curOff := spdOff - tailLen
+		rawOff := payloadOffset + curOff
+		name := idToName[hh.id]
+		if name == "" {
+			name = cfg.name
+		}
+		if name == "" {
+			name = fmt.Sprintf("ID:%d", hh.id)
+		}
+		if skipSpeedEditForStability(name, hh.id) {
+			if isHellfireName(name) {
+				e.auditHellfire(fmt.Sprintf("SPLIT_SKIP_STABILITY name=%q id=%d caster=%d", name, hh.id, caster), combined, hh.offset)
+			}
+			continue
+		}
+		suffix := fmt.Sprintf(" [split, caster:%d, id:%d]", caster, hh.id)
+		if spdFallback {
+			suffix += " (fb)"
+		}
+
+		if cfg.brk {
+			if isHellfireName(name) {
+				e.auditHellfire(fmt.Sprintf("SPLIT_EDIT name=%q id=%d speed=%d target=break float=%t fallback=%t caster=%d", name, hh.id, spdVal, isFloat, spdFallback, caster), combined, hh.offset)
+			}
+			if isFloat {
+				binary.LittleEndian.PutUint32(raw[rawOff:rawOff+4], math.Float32bits(float32(9999999.0/10000.0)))
+			} else {
+				for j := 0; j < spdLen; j++ {
+					raw[rawOff+j] = 0xFF
+				}
+			}
+			modified = true
+			e.countModify()
+			e.emitLog(fmt.Sprintf("ACT %s spd:%d -> break%s", name, spdVal, suffix))
+			continue
+		}
+
+		added := uint64(cfg.speedPct) * 100
+		if autoMode && !cfg.override {
+			a := autoBase + autoPerMs*e.pingEWMA
+			if a < 0 {
+				a = 0
+			}
+			added = uint64(a + 0.5)
+		}
+		target := spdVal + added
+		if isHellfireName(name) {
+			e.auditHellfire(fmt.Sprintf("SPLIT_EDIT name=%q id=%d speed=%d add=%d target=%d float=%t fallback=%t caster=%d", name, hh.id, spdVal, added, target, isFloat, spdFallback, caster), combined, hh.offset)
+		}
+		if isFloat {
+			if target > 9999999 {
+				target = 9999999
+			}
+			binary.LittleEndian.PutUint32(raw[rawOff:rawOff+4], math.Float32bits(float32(float64(target)/10000.0)))
+			modified = true
+			e.countModify()
+			e.emitLog(fmt.Sprintf("ACT %s spd:%d +%d -> %d%s", name, spdVal, added, target, suffix))
+			continue
+		}
+		encoded := encodeVarintFixed(target, spdLen)
+		if len(encoded) != spdLen {
+			maxVal := (uint64(1) << (7 * uint(spdLen))) - 1
+			if target > maxVal {
+				target = maxVal
+			}
+			encoded = encodeVarintFixed(target, spdLen)
+			e.emitLog(fmt.Sprintf("ACT %s spd:%d +%d -> capped%s", name, spdVal, added, suffix))
+		} else {
+			e.emitLog(fmt.Sprintf("ACT %s spd:%d +%d -> %d%s", name, spdVal, added, target, suffix))
+		}
+		copy(raw[rawOff:rawOff+spdLen], encoded)
+		modified = true
+		e.countModify()
+	}
+	return modified
 }
 
 // ── filter + helpers ──────────────────────────────────────────
@@ -1193,7 +1561,7 @@ func buildFilter(ports []int, loopback bool) string {
 			return "loopback and tcp and !impostor and tcp.SrcPort > 1024 and tcp.PayloadLength >= 40"
 		}
 		return fmt.Sprintf(
-			"loopback and tcp and !impostor and (((%s) and tcp.PayloadLength >= 40) or ((%s) and tcp.PayloadLength >= 4))",
+			"loopback and tcp and !impostor and (((%s) and tcp.PayloadLength > 0) or ((%s) and tcp.PayloadLength >= 4))",
 			src, dst)
 	}
 
@@ -1202,7 +1570,7 @@ func buildFilter(ports []int, loopback bool) string {
 		return "inbound and tcp and tcp.DstPort > 1024 and tcp.SrcPort > 1024 and " + noLoop + " and tcp.PayloadLength >= 40"
 	}
 	return fmt.Sprintf(
-		"tcp and %s and ((inbound and (%s) and tcp.PayloadLength >= 40) or (outbound and (%s) and tcp.PayloadLength >= 4))",
+		"tcp and %s and ((inbound and (%s) and tcp.PayloadLength > 0) or (outbound and (%s) and tcp.PayloadLength >= 4))",
 		noLoop, src, dst)
 }
 

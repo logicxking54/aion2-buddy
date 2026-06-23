@@ -167,13 +167,108 @@ func findAllSkillIDs(data []byte, targetIDs map[uint32]struct{}, firstBytes map[
 	return results
 }
 
-// findAttackSpeedOffset walks the packet structure to locate the attack_speed
-// field. Returns (offset, length, value, isFloat, ok). Most skills encode the
-// speed as a varint; charge skills (e.g. Hellfire) encode it as a 4-byte float
-// holding value/10000. `value` is always returned in raw varint units (the
-// float form is scaled ×10000) so callers treat both the same; `isFloat` tells
-// the caller which wire form to write back.
-func findAttackSpeedOffset(data []byte, skillOffset int) (int, int, uint64, bool, bool) {
+// findAttackSpeedOffset locates a cast's attack_speed field. Returns
+// (offset, length, value, isFloat, ok). It first tries the standard fixed layout
+// (entity key → 4 position floats → speed); if that fails — some situational cast
+// records use a compact position block with fewer floats — it falls back to a
+// bounded search for the float speed signature. value is always in raw varint
+// units (float form ×10000); isFloat tells the caller which wire form to write.
+// The final bool reports whether the FALLBACK scanner found the speed (the fixed
+// parser failed): a diagnostic signal — if it's true a lot in dense fights, the
+// standard layout is breaking under coalescing.
+func findAttackSpeedOffset(data []byte, skillOffset int) (int, int, uint64, bool, bool, bool) {
+	if off, ln, v, fl, ok := findSpeedFixed(data, skillOffset); ok {
+		return off, ln, v, fl, ok, false
+	}
+	off, ln, v, fl, ok := findSpeedSearch(data, skillOffset)
+	return off, ln, v, fl, ok, ok // last bool = found via fallback
+}
+
+// findSpeedSearch handles compact casts whose position block is not four floats.
+// It scans for either speed encoding followed by a marker and validates one of
+// the known structural trailer forms: a same-family reference, a secondary
+// speed value, or any correctly framed legacy length-prefixed record.
+func findSpeedSearch(data []byte, skillOffset int) (int, int, uint64, bool, bool) {
+	const enableExtendedSpeedTrailers = false
+
+	dlen := len(data)
+	skillID := binary.LittleEndian.Uint32(data[skillOffset : skillOffset+4])
+	isHellfireMax := skillID == 15063453 || skillID == 15062353
+	start := skillOffset + 6
+	end := start + 70
+	if end > dlen-5 {
+		end = dlen - 5
+	}
+	famBytes := data[skillOffset+1 : skillOffset+4]
+	hasFamilyAfter := func(post int) bool {
+		upper := post + 48
+		if upper > dlen {
+			upper = dlen
+		}
+		return bytes.Contains(data[post:upper], famBytes)
+	}
+	hasCompactTrailer := func(post int) bool {
+		if post+2 >= dlen || (data[post] != 0x01 && data[post] != 0x02) {
+			return false
+		}
+		secondary, secondaryLen := parseVarint(data, post+1)
+		return secondary >= 10000 && secondary < 40000 && post+1+secondaryLen < dlen
+	}
+	hasFramedTrailer := func(post int) bool {
+		start := post + 1
+		// Older streams may pad between the marker and the next record.
+		for start < dlen && data[start] == 0 && start < post+5 {
+			start++
+		}
+		if start >= dlen {
+			return false
+		}
+		declared, lenBytes := parseVarint(data, start)
+		if lenBytes <= 0 || declared > uint64(dlen) {
+			return false
+		}
+		recordLen := int(declared) + lenBytes - 4
+		return recordLen >= lenBytes+2 && start+recordLen <= dlen
+	}
+	for pos := start; pos < end; pos++ {
+		compactSpeedPos := pos-skillOffset >= 16 && pos-skillOffset <= 25
+		// Varint form first: a plausible value, then the marker + trailing-record
+		// signature. Require v >= 10000 so a float whose low byte parses as a small
+		// varint (Hellfire's 16 fb fb 3f reads as 22) falls through to the float
+		// branch below instead of matching here.
+		if v, ln := parseVarint(data, pos); v >= 10000 && v < 40000 {
+			post := pos + ln
+			if post < dlen && (data[post] == 0x01 || data[post] == 0x02) &&
+				(hasFamilyAfter(post) || (enableExtendedSpeedTrailers &&
+					(hasCompactTrailer(post) || (compactSpeedPos && hasFramedTrailer(post))))) {
+				return pos, ln, v, false, true
+			}
+		}
+		// Float form (charge skills store value/10000 in a 4-byte float32).
+		if isHellfireMax {
+			continue
+		}
+		f := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[pos : pos+4])))
+		v := f * 10000
+		if math.IsNaN(f) || math.IsInf(f, 0) || v < 10000 || v >= 40000 {
+			continue
+		}
+		post := pos + 4
+		if data[post] != 0x01 && data[post] != 0x02 {
+			continue
+		}
+		if !hasFamilyAfter(post) && !(enableExtendedSpeedTrailers &&
+			(hasCompactTrailer(post) || (compactSpeedPos && hasFramedTrailer(post)))) {
+			continue
+		}
+		return pos, 4, uint64(v + 0.5), true, true
+	}
+	return 0, 0, 0, false, false
+}
+
+// findSpeedFixed parses the standard cast layout: entity key, 4 position floats,
+// then the speed (varint, or a 4-byte float ×10000 for charge skills).
+func findSpeedFixed(data []byte, skillOffset int) (int, int, uint64, bool, bool) {
 	dlen := len(data)
 	pos := skillOffset + 6 // skip skill_id(4) + tick(1) + pkt_type(1)
 	if pos >= dlen {
@@ -191,6 +286,17 @@ func findAttackSpeedOffset(data []byte, skillOffset int) (int, int, uint64, bool
 		_, partsLen := parseVarint(data, pos)
 		pos += partsLen
 	}
+	if off, ln, speed, isFloat, ok := findSpeedAfterPosition(data, skillOffset, pos); ok {
+		return off, ln, speed, isFloat, true
+	}
+	// Dense combat can add a one-byte position-layout flag before the same four
+	// floats. Hellfire Max commonly uses 0xf1 here. Structural validation below
+	// still requires a valid speed marker and matching skill-family reference.
+	return findSpeedAfterPosition(data, skillOffset, pos+1)
+}
+
+func findSpeedAfterPosition(data []byte, skillOffset, pos int) (int, int, uint64, bool, bool) {
+	dlen := len(data)
 
 	// 4 coordinate floats (yaw, x, z, y)
 	if pos+16 > dlen {
@@ -245,7 +351,13 @@ func findAttackSpeedOffset(data []byte, skillOffset int) (int, int, uint64, bool
 	// so match the upper 3 id bytes (shared across tiers) rather than the exact
 	// 4 — the low byte is the tier (0=base, 1/2=charge levels, 3=max).
 	famBytes := data[skillOffset+1 : skillOffset+4]
-	upper := post + 16
+	// Search well past the speed for the family reference: in dense party packets
+	// extra sub-records get coalesced between the speed and the trailing skill ref,
+	// pushing it farther back than the original 16-byte window — which silently
+	// rejected casts whose speed we had already located and validated. The speed is
+	// confirmed three other ways (sane floats, plausible value, 0x01/0x02 marker),
+	// so a wider window here only loosens a redundant veto.
+	upper := post + 48
 	if upper > dlen {
 		upper = dlen
 	}
@@ -434,4 +546,16 @@ func tcpPorts(raw []byte) (src, dst int) {
 	src = int(raw[ipHdrLen])<<8 | int(raw[ipHdrLen+1])
 	dst = int(raw[ipHdrLen+2])<<8 | int(raw[ipHdrLen+3])
 	return
+}
+
+// tcpSequence reads the TCP sequence number from an IPv4 packet.
+func tcpSequence(raw []byte) (uint32, bool) {
+	if len(raw) < 20 || raw[0]>>4 != 4 {
+		return 0, false
+	}
+	ipHdrLen := int(raw[0]&0x0F) * 4
+	if ipHdrLen+8 > len(raw) {
+		return 0, false
+	}
+	return binary.BigEndian.Uint32(raw[ipHdrLen+4 : ipHdrLen+8]), true
 }

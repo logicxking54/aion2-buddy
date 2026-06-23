@@ -1,40 +1,24 @@
 <script lang="ts" setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { config, loadConfig, saveConfig } from '../config'
-import { casterFilter, clearLogs, errorMsg, initCapture, logs, running } from '../captureController'
+import { clearLogs, errorMsg, initCapture, logs, running } from '../captureController'
 import { setCasterMask } from '../projects/pingmaker/capture'
 
 const { t } = useI18n()
 const logBox = ref<HTMLElement | null>(null)
 
-// The caster filter (input + engine push + auto-lock) now lives in the Ping Maker
-// menu and the shared captureController. Here we only use its value to filter the
-// displayed log lines: keep lines tagged "[caster <id>]" with the matching id.
-// Match the full bracketed tag so 1189 doesn't also match 11890.
-const filteredLogs = computed(() => {
-  const id = casterFilter.value.trim()
-  if (!id) return logs
-  const tag = `[caster ${id}]`
-  return logs.filter((e) => e.msg.includes(tag))
-})
-
 // ── FPS mask ────────────────────────────────────────────────────────────
 // When on, the engine rewrites every OTHER player's cast skill_id to a no-VFX
-// "Dodge" skill, so the client renders nothing heavy for them → higher FPS in
-// crowded fights. Your own casts are untouched. The caster we keep is your
-// auto-detected one (the filter value); while the field is empty the engine
-// no-ops, so it can never hide your own skills before your caster is locked.
+// "Dodge" skill for higher FPS in crowded fights. Hidden for now; kept here so the
+// toggle still wires up if re-enabled.
 const DODGE_SKILL_ID = 15000100 // one fixed Dodge id for everyone (near-invisible)
 
 function pushMask() {
   if (!running.value) return // engine isn't capturing; nothing to mask
-  const keep = Number.parseInt(casterFilter.value.trim(), 10)
-  setCasterMask(config.casterMask, Number.isFinite(keep) ? keep : 0, DODGE_SKILL_ID).catch(() => {})
+  setCasterMask(config.casterMask, 0, DODGE_SKILL_ID).catch(() => {})
 }
-// Re-push whenever the toggle flips, our detected caster changes, or capture
-// (re)starts — so the engine always has the current keep-caster + on-state.
-watch([() => config.casterMask, casterFilter, running], pushMask, { immediate: true })
+watch([() => config.casterMask, running], pushMask, { immediate: true })
 
 function toggleMask() {
   config.casterMask = !config.casterMask
@@ -72,7 +56,7 @@ function startDrag(e: MouseEvent) {
 // one, so the length stays constant and a length watcher would stop firing — but
 // the last element is a fresh object on every append.
 watch(
-  () => filteredLogs.value[filteredLogs.value.length - 1],
+  () => logs[logs.length - 1],
   () => {
     nextTick(() => {
       if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight
@@ -132,8 +116,7 @@ onUnmounted(endDrag)
         class="mt-2 min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/5 bg-ink-900 p-3 font-mono text-xs leading-relaxed"
       >
         <p v-if="logs.length === 0" class="text-slate-600">{{ t('ping.logsEmpty') }}</p>
-        <p v-else-if="filteredLogs.length === 0" class="text-slate-600">{{ t('ping.logsNoMatch') }}</p>
-        <div v-for="(entry, i) in filteredLogs" :key="i" class="flex gap-2">
+        <div v-for="(entry, i) in logs" :key="i" class="flex gap-2">
           <span class="shrink-0 text-slate-600">{{ entry.time }}</span>
           <span
             :class="{

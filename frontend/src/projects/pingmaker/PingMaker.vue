@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { classes, skills, skillColor, type Skill, type SkillClass } from './skills'
 import errorImage from '../../assets/images/skill-error.svg'
 import { config, loadConfig, saveConfig } from '../../config'
-import { casterFilter, onFilterInput } from '../../captureController'
 
 const { t } = useI18n()
 
@@ -127,20 +126,6 @@ onMounted(async () => {
 
 <template>
   <div class="mx-auto flex h-full max-w-6xl flex-col gap-4">
-    <!-- ============ Capture controls (dev-only caster filter) ============ -->
-    <div v-if="config.devMode" class="flex flex-wrap items-center gap-3">
-      <!-- Caster filter — dev-only. Normal users get the ACT-driven auto-filter. -->
-      <input
-        v-model="casterFilter"
-        @input="onFilterInput"
-        type="text"
-        inputmode="numeric"
-        :title="t('ping.casterFilter')"
-        :placeholder="t('ping.casterFilterPlaceholder')"
-        class="ml-auto w-52 rounded-md border border-white/10 bg-ink-900 px-2.5 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:border-accent/60 focus:outline-none"
-      />
-    </div>
-
     <div class="grid min-h-0 flex-1 grid-cols-2 gap-4">
     <!-- ============ LEFT: skill picker ============ -->
     <div class="flex min-h-0 flex-col rounded-xl border border-white/5 bg-ink-700 p-5">

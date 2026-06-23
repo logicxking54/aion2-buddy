@@ -10,7 +10,6 @@ import {
   captureAvailable,
   EventsOn,
   isCapturing,
-  setCasterFilter,
   setCatalog,
   startCapture,
   stopCapture,
@@ -33,24 +32,6 @@ export const ping = ref(0)
 export const errorMsg = ref('')
 export const gameDetected = ref(false)
 export const logs = reactive<LogEntry[]>([])
-
-// Caster (entity key) of your most recent own ACT cast, emitted by the engine
-// before the engine-level caster filter is applied. Drives the caster filter's
-// auto-lock so it can follow you even when other casters are suppressed.
-export const lastActCaster = ref(0)
-let lastActSeenAt = 0 // ms timestamp the current locked caster was last seen (stickiness)
-
-// Caster filter (entity key as a string; '' = none). Shared between the Ping Maker
-// menu (the input field), the global log panel (display filter), and the engine —
-// which, when set, ignores every other caster entirely (no log, no cast event, no
-// combat-speed edit). Auto-locks onto your own caster (from capture:act / lastActCaster)
-// unless the user manually overrides the field (manualFilter); clearing it re-enables
-// the auto-lock. The watchers that drive auto-lock + the engine push live in initCapture.
-export const casterFilter = ref('')
-export const manualFilter = ref(false)
-export function onFilterInput(e: Event) {
-  manualFilter.value = (e.target as HTMLInputElement).value.trim() !== ''
-}
 
 // Recently used skills (newest first), for the overlay HUD. Each cast is a
 // numeric skill id; the UI maps it to a Skill for image/name.
@@ -156,19 +137,6 @@ export async function initCapture() {
     castCount.value++
     casting.value = true
   })
-  EventsOn('capture:act', (id: number) => {
-    const n = Number(id)
-    if (!Number.isFinite(n) || n <= 0) return
-    const now = Date.now()
-    // Sticky lock: keep the current caster unless it's the same id (refresh its
-    // freshness) or the current one has gone quiet for a while (a real caster
-    // change, e.g. re-entering a dungeon). This stops a single misread key during
-    // a spam burst from hijacking the lock away from you and dropping your casts.
-    if (n === lastActCaster.value || lastActCaster.value === 0 || now - lastActSeenAt > 4000) {
-      lastActCaster.value = n
-      lastActSeenAt = now
-    }
-  })
   EventsOn('game:status', (v: boolean) => {
     gameDetected.value = !!v
   })
@@ -207,24 +175,5 @@ export async function initCapture() {
       if (running.value) updateCapture(buildConfig()).catch(() => {})
     },
     { deep: true },
-  )
-
-  // Auto-lock the caster filter onto our own caster (from capture:act), unless the
-  // user is manually overriding the field. Re-locks when our caster id changes.
-  watch(lastActCaster, (id) => {
-    if (manualFilter.value) return
-    if (id > 0) casterFilter.value = String(id)
-  })
-
-  // Push the caster filter to the engine: when set, it ignores every other caster.
-  // Re-push when the value changes or capture (re)starts.
-  watch(
-    [casterFilter, running],
-    () => {
-      if (!running.value) return // engine isn't capturing; nothing to filter
-      const id = Number.parseInt(casterFilter.value.trim(), 10)
-      setCasterFilter(Number.isFinite(id) ? id : 0).catch(() => {})
-    },
-    { immediate: true },
   )
 }

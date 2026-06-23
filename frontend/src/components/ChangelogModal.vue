@@ -18,7 +18,26 @@ interface Release {
   changes: Change[]
 }
 const releases: Release[] = [
-  { version: '1.0.3', changes: [{ en: 'Improved Ping Maker', th: 'ปรับปรุงฟีเจอร์ Ping Maker' }] },
+  {
+    version: '1.0.5',
+    changes: [
+      { en: 'Improved Ping Maker to work well in party dungeons', th: 'ปรับปรุง Ping Maker ให้ทำงานได้ดีในปาร์ตี้ดันเจี้ยน' },
+    ],
+  },
+  {
+    version: '1.0.4',
+    changes: [
+      { en: 'Fixed Ping Maker bug', th: 'แก้บั๊ก Ping Maker' },
+      { en: 'Added TCP & Network tuning mods', th: 'เพิ่มม็อด TCP และปรับแต่งเครือข่าย' },
+    ],
+  },
+  {
+    version: '1.0.3',
+    changes: [
+      { en: 'Improved Ping Maker', th: 'ปรับปรุงฟีเจอร์ Ping Maker' },
+      { en: 'Added Mod feature', th: 'เพิ่มฟีเจอร์ Mod' },
+    ],
+  },
   { version: '1.0.2', changes: [{ en: 'Added Memory Reader', th: 'เพิ่มฟีเจอร์ Memory Reader' }] },
   { version: '1.0.1', changes: [{ en: 'Added Caster Filter', th: 'เพิ่มฟีเจอร์ Caster Filter' }] },
   { version: '1.0.0', changes: [{ en: 'Added Ping Maker', th: 'เพิ่มฟีเจอร์ Ping Maker' }] },
