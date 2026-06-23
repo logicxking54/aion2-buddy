@@ -241,6 +241,76 @@ func findSpeedSearch(data []byte, skillOffset int, _ bool) (int, int, uint64, bo
 	return 0, 0, 0, false, false
 }
 
+// findAggressiveSpeedCandidate detects the old unsafe aggressive fallback
+// candidates for diagnostics only. Callers must not edit this offset: these
+// trailer-only matches can be false positives in live traffic.
+func findAggressiveSpeedCandidate(data []byte, skillOffset int) (int, int, uint64, bool, bool) {
+	dlen := len(data)
+	skillID := binary.LittleEndian.Uint32(data[skillOffset : skillOffset+4])
+	isHellfireMax := skillID == 15063453 || skillID == 15062353
+	start := skillOffset + 6
+	end := start + 70
+	if end > dlen-5 {
+		end = dlen - 5
+	}
+	famBytes := data[skillOffset+1 : skillOffset+4]
+	hasFamilyAfter := func(post int) bool {
+		upper := post + 48
+		if upper > dlen {
+			upper = dlen
+		}
+		return bytes.Contains(data[post:upper], famBytes)
+	}
+	hasCompactTrailer := func(post int) bool {
+		if post+2 >= dlen || (data[post] != 0x01 && data[post] != 0x02) {
+			return false
+		}
+		secondary, secondaryLen := parseVarint(data, post+1)
+		return secondary >= 10000 && secondary < 40000 && post+1+secondaryLen < dlen
+	}
+	hasFramedTrailer := func(post int) bool {
+		start := post + 1
+		for start < dlen && data[start] == 0 && start < post+5 {
+			start++
+		}
+		if start >= dlen {
+			return false
+		}
+		declared, lenBytes := parseVarint(data, start)
+		if lenBytes <= 0 || declared > uint64(dlen) {
+			return false
+		}
+		recordLen := int(declared) + lenBytes - 4
+		return recordLen >= lenBytes+2 && start+recordLen <= dlen
+	}
+	for pos := start; pos < end; pos++ {
+		compactSpeedPos := pos-skillOffset >= 16 && pos-skillOffset <= 25
+		if v, ln := parseVarint(data, pos); v >= 10000 && v < 40000 {
+			post := pos + ln
+			if post < dlen && (data[post] == 0x01 || data[post] == 0x02) &&
+				!hasFamilyAfter(post) &&
+				(hasCompactTrailer(post) || (compactSpeedPos && hasFramedTrailer(post))) {
+				return pos, ln, v, false, true
+			}
+		}
+		if isHellfireMax {
+			continue
+		}
+		f := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[pos : pos+4])))
+		v := f * 10000
+		if math.IsNaN(f) || math.IsInf(f, 0) || v < 10000 || v >= 40000 {
+			continue
+		}
+		post := pos + 4
+		if post < dlen && (data[post] == 0x01 || data[post] == 0x02) &&
+			!hasFamilyAfter(post) &&
+			(hasCompactTrailer(post) || (compactSpeedPos && hasFramedTrailer(post))) {
+			return pos, 4, uint64(v + 0.5), true, true
+		}
+	}
+	return 0, 0, 0, false, false
+}
+
 // findSpeedFixed parses the standard cast layout: entity key, 4 position floats,
 // then the speed (varint, or a 4-byte float ×10000 for charge skills).
 func findSpeedFixed(data []byte, skillOffset int) (int, int, uint64, bool, bool) {
@@ -337,7 +407,9 @@ func findSpeedAfterPosition(data []byte, skillOffset, pos int) (int, int, uint64
 		upper = dlen
 	}
 	if !bytes.Contains(data[post:upper], famBytes) {
-		return 0, 0, 0, false, false
+		if !(isFloat && hasLegacyChargeSpeedTrailer(data, post)) {
+			return 0, 0, 0, false, false
+		}
 	}
 
 	return pos, speedLen, speed, isFloat, true
@@ -347,6 +419,13 @@ func findSpeedAfterPosition(data []byte, skillOffset, pos int) (int, int, uint64
 
 // extractEntityKey reads the entity key from the prefix bytes before a skill ID
 // (3 bytes back, then 2). Returns 0 if none found.
+func hasLegacyChargeSpeedTrailer(data []byte, post int) bool {
+	if post+8 > len(data) || data[post] != 0x01 {
+		return false
+	}
+	return bytes.Equal(data[post+1:post+8], []byte{0x0c, 0x1b, 0x38, 0x00, 0x00, 0x23, 0x00})
+}
+
 func extractEntityKey(data []byte, skillOffset int) uint64 {
 	for _, back := range [2]int{3, 2} {
 		if skillOffset >= back {

@@ -121,16 +121,23 @@ func TestFindAttackSpeed_HellfireMaxCompactPosition(t *testing.T) {
 	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, true); ok {
 		t.Fatal("aggressive parser must not accept secondary-speed compact trailers")
 	}
+	if _, _, _, _, ok := findAggressiveSpeedCandidate(data, 0); !ok {
+		t.Fatal("expected diagnostic aggressive candidate for secondary-speed compact trailer")
+	}
 }
 
 func TestFindAttackSpeed_HellfireCompactFloatTrailer(t *testing.T) {
 	data := mustHex(t, hellfireCompactFloatHex)
 
-	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, false); ok {
-		t.Fatal("length-prefixed compact trailers are disabled for connection stability")
+	off, n, val, isFloat, ok, fallback := findAttackSpeedOffset(data, 0, false)
+	if !ok {
+		t.Fatal("expected exact legacy charge trailer to locate compact float speed")
 	}
-	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, true); ok {
-		t.Fatal("aggressive parser must not accept length-prefixed compact trailers")
+	if fallback {
+		t.Fatal("exact legacy charge trailer should be handled by the fixed parser")
+	}
+	if !isFloat || off != 25 || n != 4 || val != 19686 {
+		t.Fatalf("expected off=25 len=4 val=19686 float, got off=%d len=%d val=%d float=%t", off, n, val, isFloat)
 	}
 }
 

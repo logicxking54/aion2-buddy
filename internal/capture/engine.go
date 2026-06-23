@@ -658,7 +658,8 @@ func (e *Engine) auditHellfire(event string, payload []byte, skillOffset int) {
 // layouts can be reproduced without enabling the high-volume inspector.
 func (e *Engine) emitMiss(msg string, payload []byte, skillOffset int) {
 	e.emitLog(msg)
-	if !strings.Contains(strings.ToLower(msg), "hellfire") {
+	low := strings.ToLower(msg)
+	if !strings.Contains(low, "hellfire") && !strings.Contains(low, "aggressive_candidate") {
 		return
 	}
 	path, err := missLogPath()
@@ -1385,6 +1386,12 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			reason := "layout-unparsed"
 			if hh.offset+6+16+4 > len(payload) {
 				reason = "truncated/segmented"
+			}
+			if aggressive {
+				if candOff, candLen, candVal, candFloat, candOK := findAggressiveSpeedCandidate(payload, hh.offset); candOK {
+					e.emitMiss(fmt.Sprintf("AGGRESSIVE_CANDIDATE %s off=%d len=%d val=%d float=%t%s", name, candOff, candLen, candVal, candFloat, casterStr), payload, hh.offset)
+					reason = "unsafe-aggressive-candidate"
+				}
 			}
 			e.emitMiss(fmt.Sprintf("MISS %s (%s)%s", name, reason, casterStr), payload, hh.offset)
 		}
