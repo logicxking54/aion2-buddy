@@ -95,6 +95,11 @@ func (c *Capture) SetDecode(on bool) {
 	c.engine.SetDecode(on)
 }
 
+// SetAggressiveParser toggles compact/framed fallback speed matching.
+func (c *Capture) SetAggressiveParser(on bool) {
+	c.engine.SetAggressiveParser(on)
+}
+
 // SetCasterMask toggles the FPS-saver mask: the engine rewrites every OTHER
 // player's cast skill_id to a no-VFX Dodge skill so the client renders nothing
 // heavy for them. keepCaster is your detected caster (0 = not yet known → no-op);

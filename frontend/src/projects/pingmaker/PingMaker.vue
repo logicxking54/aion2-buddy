@@ -216,6 +216,16 @@ onMounted(async () => {
         <span class="text-[11px] text-slate-500">%</span>
       </div>
 
+      <label class="mt-2 flex items-center gap-2 rounded-lg border border-white/5 bg-ink-800 px-3 py-2 text-xs font-semibold text-slate-300">
+        <input
+          v-model="config.disableAggressiveParser"
+          @change="saveConfig"
+          type="checkbox"
+          class="h-4 w-4 rounded border-white/20 bg-ink-900 text-accent focus:ring-accent/40"
+        />
+        <span>{{ t('ping.disableAggressiveParser') }}</span>
+      </label>
+
       <!-- Search added skills -->
       <input
         v-if="rows.length"

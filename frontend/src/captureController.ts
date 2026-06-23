@@ -10,6 +10,7 @@ import {
   captureAvailable,
   EventsOn,
   isCapturing,
+  setAggressiveParser,
   setCatalog,
   startCapture,
   stopCapture,
@@ -164,6 +165,7 @@ export async function initCapture() {
   await loadConfig()
   if (captureAvailable()) {
     setCatalog(skills.map((s) => ({ name: s.name, ids: s.skill_ids }))).catch(() => {})
+    setAggressiveParser(!config.disableAggressiveParser).catch(() => {})
     running.value = await isCapturing()
     if (running.value) status.value = 'running'
   }
@@ -175,5 +177,13 @@ export async function initCapture() {
       if (running.value) updateCapture(buildConfig()).catch(() => {})
     },
     { deep: true },
+  )
+
+  watch(
+    [() => config.disableAggressiveParser, running],
+    () => {
+      if (captureAvailable()) setAggressiveParser(!config.disableAggressiveParser).catch(() => {})
+    },
+    { immediate: true },
   )
 }

@@ -46,7 +46,7 @@ func TestFindAttackSpeed_HellfireFloat(t *testing.T) {
 	data := mustHex(t, hellfireHex)
 	const skillOffset = 21 // from the inspector dump
 
-	off, n, val, isFloat, ok, _ := findAttackSpeedOffset(data, skillOffset)
+	off, n, val, isFloat, ok, _ := findAttackSpeedOffset(data, skillOffset, false)
 	if !ok {
 		t.Fatal("expected to find Hellfire's float-encoded speed, got not-found")
 	}
@@ -73,7 +73,7 @@ func TestFindAttackSpeed_HellfireMaxMeteor(t *testing.T) {
 	data := mustHex(t, hellfireMaxHex)
 	const skillOffset = 55 // the Hellfire - Max hit, from the inspector dump
 
-	off, n, val, isFloat, ok, _ := findAttackSpeedOffset(data, skillOffset)
+	off, n, val, isFloat, ok, _ := findAttackSpeedOffset(data, skillOffset, false)
 	if !ok {
 		t.Fatal("expected to find the meteor's varint speed at offset 80")
 	}
@@ -88,7 +88,7 @@ func TestFindAttackSpeed_HellfireMaxMeteor(t *testing.T) {
 func TestFindAttackSpeed_HellfireMaxFlaggedPosition(t *testing.T) {
 	data := mustHex(t, hellfireMaxFlaggedHex)
 
-	off, n, val, isFloat, ok, fallback := findAttackSpeedOffset(data, 0)
+	off, n, val, isFloat, ok, fallback := findAttackSpeedOffset(data, 0, false)
 	if !ok {
 		t.Fatal("expected to find speed after the one-byte position layout flag")
 	}
@@ -103,9 +103,9 @@ func TestFindAttackSpeed_HellfireMaxFlaggedPosition(t *testing.T) {
 func TestFindAttackSpeed_HellfireMaxVariablePrefix(t *testing.T) {
 	data := mustHex(t, hellfireMaxFallbackHex)
 
-	off, n, val, isFloat, ok, fallback := findAttackSpeedOffset(data, 0)
+	off, n, val, isFloat, ok, fallback := findAttackSpeedOffset(data, 0, false)
 	if !ok || !fallback {
-		t.Fatal("expected structural fallback to find variable-prefix Hellfire speed")
+		t.Fatal("expected strict fallback to find variable-prefix Hellfire speed")
 	}
 	if isFloat || n != 3 || val != 20686 {
 		t.Fatalf("expected len=3 val=20686 varint, got off=%d len=%d val=%d float=%t", off, n, val, isFloat)
@@ -115,16 +115,22 @@ func TestFindAttackSpeed_HellfireMaxVariablePrefix(t *testing.T) {
 func TestFindAttackSpeed_HellfireMaxCompactPosition(t *testing.T) {
 	data := mustHex(t, hellfireMaxCompactHex)
 
-	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0); ok {
+	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, false); ok {
 		t.Fatal("secondary-speed compact trailers are disabled for connection stability")
+	}
+	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, true); ok {
+		t.Fatal("aggressive parser must not accept secondary-speed compact trailers")
 	}
 }
 
 func TestFindAttackSpeed_HellfireCompactFloatTrailer(t *testing.T) {
 	data := mustHex(t, hellfireCompactFloatHex)
 
-	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0); ok {
+	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, false); ok {
 		t.Fatal("length-prefixed compact trailers are disabled for connection stability")
+	}
+	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, true); ok {
+		t.Fatal("aggressive parser must not accept length-prefixed compact trailers")
 	}
 }
 
@@ -137,7 +143,7 @@ func TestFindSpeedSearchAcceptsAllFramedLegacyTrailerLengths(t *testing.T) {
 			data = append(data, 0)
 		}
 
-		if _, _, _, _, ok := findSpeedSearch(data, 0); ok {
+		if _, _, _, _, ok := findSpeedSearch(data, 0, false); ok {
 			t.Fatalf("trailer len 0x%02x: generalized framed trailers must remain disabled", declaredLen)
 		}
 	}
@@ -150,7 +156,7 @@ func TestFindSpeedSearchRejectsFloatForHellfireMax(t *testing.T) {
 	data = append(data, speed[:]...)
 	data = append(data, 0x01, 0x0c, 0x18, 0x38, 0, 0, 0, 0, 0, 0)
 
-	if _, _, _, _, ok := findSpeedSearch(data, 0); ok {
+	if _, _, _, _, ok := findSpeedSearch(data, 0, false); ok {
 		t.Fatal("Hellfire Max must not accept a float fallback candidate")
 	}
 }
@@ -159,7 +165,7 @@ func TestFindAttackSpeed_FlameArrowVarint(t *testing.T) {
 	data := mustHex(t, flameArrowHex)
 	const skillOffset = 21
 
-	off, n, val, isFloat, ok, _ := findAttackSpeedOffset(data, skillOffset)
+	off, n, val, isFloat, ok, _ := findAttackSpeedOffset(data, skillOffset, false)
 	if !ok {
 		t.Fatal("expected to find Flame Arrow's varint speed")
 	}

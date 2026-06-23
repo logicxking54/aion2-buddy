@@ -192,6 +192,7 @@ type Engine struct {
 	comboCastMap  map[uint32]uint32 // source skill family -> exact target id (castId rewrite experiment)
 	comboSkillMap map[uint32]uint32 // source skill family -> exact target id (main skill_id rewrite)
 	decode        bool              // print all decoded fields for each cast
+	aggressive    bool              // allow compact/framed speed fallback matches
 	maskOn        bool              // FPS mask: rewrite other players' cast skill_id to Dodge
 	maskKeep      uint64            // your caster (entity key) left untouched; 0 = not locked yet
 	maskDodge     uint32            // skill_id written over masked casts (a no-VFX Dodge id)
@@ -458,6 +459,22 @@ func (e *Engine) SetDecode(on bool) {
 		e.emitLog("Decode ON (full field dump per cast)")
 	} else {
 		e.emitLog("Decode OFF")
+	}
+}
+
+// SetAggressiveParser keeps the UI setting wired, but compact/framed fallback
+// matching is disabled because it can touch the wrong live field and reconnect.
+func (e *Engine) SetAggressiveParser(on bool) {
+	e.mu.Lock()
+	was := e.aggressive
+	e.aggressive = on
+	e.mu.Unlock()
+	if was != on {
+		if on {
+			e.emitLog("Aggressive parser ignored (unsafe fallback disabled)")
+		} else {
+			e.emitLog("Aggressive parser OFF")
+		}
 	}
 }
 
@@ -938,6 +955,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	comboCastMap := e.comboCastMap
 	comboSkillMap := e.comboSkillMap
 	decode := e.decode
+	aggressive := e.aggressive
 	maskOn := e.maskOn
 	maskKeep := e.maskKeep
 	maskDodge := e.maskDodge
@@ -1001,7 +1019,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	key := flowKey{src: srcPort, dst: dstPort}
 	if seq, seqOK := tcpSequence(raw); seqOK {
 		defer e.updateSplitTail(key, payload, seq)
-		if e.recoverSplitCasts(raw, payload, payloadOffset, key, seq, scanIDs, scanFB, lookup, idToName, autoMode, autoBase, autoPerMs, casterFilter) {
+		if e.recoverSplitCasts(raw, payload, payloadOffset, key, seq, scanIDs, scanFB, lookup, idToName, autoMode, autoBase, autoPerMs, casterFilter, aggressive) {
 			modified = true
 		}
 	}
@@ -1184,7 +1202,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		var spdVal uint64
 		var isFloat, spdFound, spdFallback bool
 		if isConfigured {
-			spdOff, spdLen, spdVal, isFloat, spdFound, spdFallback = findAttackSpeedOffset(payload, hh.offset)
+			spdOff, spdLen, spdVal, isFloat, spdFound, spdFallback = findAttackSpeedOffset(payload, hh.offset, aggressive)
 		}
 
 		// Combo-chain test: rewrite this cast's trailing record
@@ -1429,7 +1447,7 @@ func (e *Engine) updateSplitTail(key flowKey, payload []byte, seq uint32) {
 // previous TCP segment while its speed field landed in this segment. Because the
 // edit is same-length and only touches bytes in the current packet, TCP sequence
 // numbers and packet sizes remain unchanged.
-func (e *Engine) recoverSplitCasts(raw []byte, payload []byte, payloadOffset int, key flowKey, seq uint32, scanIDs map[uint32]struct{}, scanFB map[byte]struct{}, lookup map[uint32]skillCfg, idToName map[uint32]string, autoMode bool, autoBase, autoPerMs float64, casterFilter uint64) bool {
+func (e *Engine) recoverSplitCasts(raw []byte, payload []byte, payloadOffset int, key flowKey, seq uint32, scanIDs map[uint32]struct{}, scanFB map[byte]struct{}, lookup map[uint32]skillCfg, idToName map[uint32]string, autoMode bool, autoBase, autoPerMs float64, casterFilter uint64, aggressive bool) bool {
 	state := e.tails[key]
 	tail := state.data
 	if len(tail) == 0 || len(payload) == 0 || state.nextSeq != seq {
@@ -1463,7 +1481,7 @@ func (e *Engine) recoverSplitCasts(raw []byte, payload []byte, payloadOffset int
 		if casterFilter != 0 && caster != 0 && caster != casterFilter {
 			continue
 		}
-		spdOff, spdLen, spdVal, isFloat, spdFound, spdFallback := findAttackSpeedOffset(combined, hh.offset)
+		spdOff, spdLen, spdVal, isFloat, spdFound, spdFallback := findAttackSpeedOffset(combined, hh.offset, aggressive)
 		if !spdFound || spdVal < 10000 {
 			continue
 		}

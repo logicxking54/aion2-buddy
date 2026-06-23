@@ -149,6 +149,7 @@ export default {
     detecting: 'กำลังตรวจจับ…',
     active: 'สกิลที่ใช้งาน',
     defaultSpeed: 'โบนัสความเร็วคอมแบตเริ่มต้น %',
+    disableAggressiveParser: 'Safe parser (disable aggressive)',
     combatSpeed: 'โบนัสความเร็วคอมแบต %',
     break: 'เบรก',
     breakHint: 'ข้ามลิมิตความเร็ว — ใช้กับสกิลที่ไม่มีคูลดาวน์เท่านั้น',

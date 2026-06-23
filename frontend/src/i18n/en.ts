@@ -149,6 +149,7 @@ export default {
     detecting: 'detecting…',
     active: 'Active skills',
     defaultSpeed: 'Default combat speed bonus %',
+    disableAggressiveParser: 'Safe parser (disable aggressive)',
     combatSpeed: 'Combat speed bonus %',
     break: 'Break',
     breakHint: 'Bypass the speed cap — use on no-cooldown skills only',

@@ -176,21 +176,23 @@ func findAllSkillIDs(data []byte, targetIDs map[uint32]struct{}, firstBytes map[
 // The final bool reports whether the FALLBACK scanner found the speed (the fixed
 // parser failed): a diagnostic signal — if it's true a lot in dense fights, the
 // standard layout is breaking under coalescing.
-func findAttackSpeedOffset(data []byte, skillOffset int) (int, int, uint64, bool, bool, bool) {
+func findAttackSpeedOffset(data []byte, skillOffset int, _ bool) (int, int, uint64, bool, bool, bool) {
 	if off, ln, v, fl, ok := findSpeedFixed(data, skillOffset); ok {
 		return off, ln, v, fl, ok, false
 	}
-	off, ln, v, fl, ok := findSpeedSearch(data, skillOffset)
-	return off, ln, v, fl, ok, ok // last bool = found via fallback
+	// Only accept fallback matches that still carry a same-family skill reference
+	// after the speed. Compact/framed trailer-only matches looked useful in tests
+	// but can select the wrong live field and trigger a reconnect.
+	if off, ln, v, fl, ok := findSpeedSearch(data, skillOffset, false); ok {
+		return off, ln, v, fl, ok, true
+	}
+	return 0, 0, 0, false, false, false
 }
 
 // findSpeedSearch handles compact casts whose position block is not four floats.
-// It scans for either speed encoding followed by a marker and validates one of
-// the known structural trailer forms: a same-family reference, a secondary
-// speed value, or any correctly framed legacy length-prefixed record.
-func findSpeedSearch(data []byte, skillOffset int) (int, int, uint64, bool, bool) {
-	const enableExtendedSpeedTrailers = false
-
+// It scans for either speed encoding followed by a marker and validates the
+// candidate by requiring a same-family skill reference shortly after the speed.
+func findSpeedSearch(data []byte, skillOffset int, _ bool) (int, int, uint64, bool, bool) {
 	dlen := len(data)
 	skillID := binary.LittleEndian.Uint32(data[skillOffset : skillOffset+4])
 	isHellfireMax := skillID == 15063453 || skillID == 15062353
@@ -207,40 +209,14 @@ func findSpeedSearch(data []byte, skillOffset int) (int, int, uint64, bool, bool
 		}
 		return bytes.Contains(data[post:upper], famBytes)
 	}
-	hasCompactTrailer := func(post int) bool {
-		if post+2 >= dlen || (data[post] != 0x01 && data[post] != 0x02) {
-			return false
-		}
-		secondary, secondaryLen := parseVarint(data, post+1)
-		return secondary >= 10000 && secondary < 40000 && post+1+secondaryLen < dlen
-	}
-	hasFramedTrailer := func(post int) bool {
-		start := post + 1
-		// Older streams may pad between the marker and the next record.
-		for start < dlen && data[start] == 0 && start < post+5 {
-			start++
-		}
-		if start >= dlen {
-			return false
-		}
-		declared, lenBytes := parseVarint(data, start)
-		if lenBytes <= 0 || declared > uint64(dlen) {
-			return false
-		}
-		recordLen := int(declared) + lenBytes - 4
-		return recordLen >= lenBytes+2 && start+recordLen <= dlen
-	}
 	for pos := start; pos < end; pos++ {
-		compactSpeedPos := pos-skillOffset >= 16 && pos-skillOffset <= 25
 		// Varint form first: a plausible value, then the marker + trailing-record
 		// signature. Require v >= 10000 so a float whose low byte parses as a small
 		// varint (Hellfire's 16 fb fb 3f reads as 22) falls through to the float
 		// branch below instead of matching here.
 		if v, ln := parseVarint(data, pos); v >= 10000 && v < 40000 {
 			post := pos + ln
-			if post < dlen && (data[post] == 0x01 || data[post] == 0x02) &&
-				(hasFamilyAfter(post) || (enableExtendedSpeedTrailers &&
-					(hasCompactTrailer(post) || (compactSpeedPos && hasFramedTrailer(post))))) {
+			if post < dlen && (data[post] == 0x01 || data[post] == 0x02) && hasFamilyAfter(post) {
 				return pos, ln, v, false, true
 			}
 		}
@@ -257,8 +233,7 @@ func findSpeedSearch(data []byte, skillOffset int) (int, int, uint64, bool, bool
 		if data[post] != 0x01 && data[post] != 0x02 {
 			continue
 		}
-		if !hasFamilyAfter(post) && !(enableExtendedSpeedTrailers &&
-			(hasCompactTrailer(post) || (compactSpeedPos && hasFramedTrailer(post)))) {
+		if !hasFamilyAfter(post) {
 			continue
 		}
 		return pos, 4, uint64(v + 0.5), true, true

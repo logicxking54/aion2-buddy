@@ -26,6 +26,7 @@ interface CaptureBackend {
   SetInspect(on: boolean, all: boolean): Promise<void>
   SetComboTest(on: boolean): Promise<void>
   SetDecode(on: boolean): Promise<void>
+  SetAggressiveParser(on: boolean): Promise<void>
   SetCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void>
   SetCasterFilter(id: number): Promise<void>
   IsCapturing(): Promise<boolean>
@@ -78,6 +79,11 @@ export async function setComboTest(on: boolean): Promise<void> {
 export async function setDecode(on: boolean): Promise<void> {
   const b = backend()
   if (b) await b.SetDecode(on)
+}
+
+export async function setAggressiveParser(on: boolean): Promise<void> {
+  const b = backend()
+  if (b) await b.SetAggressiveParser(on)
 }
 
 export async function setCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void> {

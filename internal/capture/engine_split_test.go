@@ -32,17 +32,17 @@ func TestRecoverSplitCastsEditsSpeedInCurrentPayload(t *testing.T) {
 	if splitAt <= skillOffset+6 || splitAt >= speedOffset {
 		t.Fatal("test split must land after the cast header and before the speed")
 	}
-	if e.recoverSplitCasts(current, current, 0, key, currentSeq+1, scanIDs, scanFB, lookup, names, false, 0, 0, 0) {
+	if e.recoverSplitCasts(current, current, 0, key, currentSeq+1, scanIDs, scanFB, lookup, names, false, 0, 0, 0, false) {
 		t.Fatal("non-contiguous TCP segment must not be joined to the saved tail")
 	}
 	caster := extractEntityKey(data, skillOffset)
 	if caster == 0 {
 		t.Fatal("test packet must expose a caster id")
 	}
-	if e.recoverSplitCasts(current, current, 0, key, currentSeq, scanIDs, scanFB, lookup, names, false, 0, 0, caster+1) {
+	if e.recoverSplitCasts(current, current, 0, key, currentSeq, scanIDs, scanFB, lookup, names, false, 0, 0, caster+1, false) {
 		t.Fatal("split recovery must honor the active caster filter")
 	}
-	if !e.recoverSplitCasts(current, current, 0, key, currentSeq, scanIDs, scanFB, lookup, names, false, 0, 0, 0) {
+	if !e.recoverSplitCasts(current, current, 0, key, currentSeq, scanIDs, scanFB, lookup, names, false, 0, 0, 0, false) {
 		t.Fatal("expected split recovery to edit current payload")
 	}
 	got, _ := parseVarint(current, speedOffset-splitAt)
@@ -78,7 +78,7 @@ func TestRecoverSplitCastsRetainsContiguousMultiPacketTail(t *testing.T) {
 	names := map[uint32]string{skillID: "Split Test"}
 	thirdSeq := firstSeq + uint32(len(first)+len(second))
 
-	if !e.recoverSplitCasts(third, third, 0, key, thirdSeq, scanIDs, scanFB, lookup, names, false, 0, 0, 0) {
+	if !e.recoverSplitCasts(third, third, 0, key, thirdSeq, scanIDs, scanFB, lookup, names, false, 0, 0, 0, false) {
 		t.Fatal("expected recovery after two preceding contiguous packets")
 	}
 	got, _ := parseVarint(third, speedOffset-secondEnd)

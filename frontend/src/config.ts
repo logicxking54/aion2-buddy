@@ -54,6 +54,7 @@ export interface AppConfig {
   language: 'th' | 'en'
   character: string
   defaultSpeed: number
+  disableAggressiveParser: boolean // checked = safer parser; unchecked = aggressive compact fallback
   panelHeight: number
   overlay: boolean // overlay mode: window pinned above the game; UI adapts when on
   devMode: boolean // show developer-only menus (e.g. Packet Inspector)
@@ -74,6 +75,7 @@ export const config = reactive<AppConfig>({
   language: initialLanguage(),
   character: localStorage.getItem('aion2-character') ?? '',
   defaultSpeed: 250,
+  disableAggressiveParser: true,
   panelHeight: 300,
   overlay: false,
   devMode: false,
@@ -108,6 +110,7 @@ async function doLoad(): Promise<void> {
       if (raw) {
         const data = JSON.parse(raw)
         if (data && typeof data === 'object') Object.assign(config, data)
+        if (typeof config.disableAggressiveParser !== 'boolean') config.disableAggressiveParser = true
         // Backfill nested oversize defaults: Object.assign overwrites the whole
         // `oversize` object, so configs saved before a field existed would lack
         // it (e.g. gameIPs), crashing the menu. Defaults first, saved values win.
