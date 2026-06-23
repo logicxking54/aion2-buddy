@@ -176,17 +176,24 @@ func findAllSkillIDs(data []byte, targetIDs map[uint32]struct{}, firstBytes map[
 // The final bool reports whether the FALLBACK scanner found the speed (the fixed
 // parser failed): a diagnostic signal — if it's true a lot in dense fights, the
 // standard layout is breaking under coalescing.
-func findAttackSpeedOffset(data []byte, skillOffset int, _ bool) (int, int, uint64, bool, bool, bool) {
+func findAttackSpeedOffset(data []byte, skillOffset int, aggressive bool) (int, int, uint64, bool, bool, bool) {
 	if off, ln, v, fl, ok := findSpeedFixed(data, skillOffset); ok {
 		return off, ln, v, fl, ok, false
 	}
-	// Only accept fallback matches that still carry a same-family skill reference
-	// after the speed. Compact/framed trailer-only matches looked useful in tests
-	// but can select the wrong live field and trigger a reconnect.
+	// Strict fallback is still safe: it requires a repeated same-family skill
+	// reference after the candidate speed.
 	if off, ln, v, fl, ok := findSpeedSearch(data, skillOffset, false); ok {
 		return off, ln, v, fl, ok, true
 	}
-	return 0, 0, 0, false, false, false
+	if !aggressive {
+		return 0, 0, 0, false, false, false
+	}
+	// Safe parser OFF: allow the compact layouts we learned while debugging.
+	if off, ln, v, fl, ok := findLegacyChargeFloatSpeed(data, skillOffset); ok {
+		return off, ln, v, fl, ok, true
+	}
+	off, ln, v, fl, ok := findAggressiveSpeedCandidate(data, skillOffset)
+	return off, ln, v, fl, ok, ok
 }
 
 // findSpeedSearch handles compact casts whose position block is not four floats.
@@ -268,28 +275,13 @@ func findAggressiveSpeedCandidate(data []byte, skillOffset int) (int, int, uint6
 		secondary, secondaryLen := parseVarint(data, post+1)
 		return secondary >= 10000 && secondary < 40000 && post+1+secondaryLen < dlen
 	}
-	hasFramedTrailer := func(post int) bool {
-		start := post + 1
-		for start < dlen && data[start] == 0 && start < post+5 {
-			start++
-		}
-		if start >= dlen {
-			return false
-		}
-		declared, lenBytes := parseVarint(data, start)
-		if lenBytes <= 0 || declared > uint64(dlen) {
-			return false
-		}
-		recordLen := int(declared) + lenBytes - 4
-		return recordLen >= lenBytes+2 && start+recordLen <= dlen
-	}
 	for pos := start; pos < end; pos++ {
 		compactSpeedPos := pos-skillOffset >= 16 && pos-skillOffset <= 25
 		if v, ln := parseVarint(data, pos); v >= 10000 && v < 40000 {
 			post := pos + ln
 			if post < dlen && (data[post] == 0x01 || data[post] == 0x02) &&
 				!hasFamilyAfter(post) &&
-				(hasCompactTrailer(post) || (compactSpeedPos && hasFramedTrailer(post))) {
+				compactSpeedPos && hasCompactTrailer(post) {
 				return pos, ln, v, false, true
 			}
 		}
@@ -304,11 +296,46 @@ func findAggressiveSpeedCandidate(data []byte, skillOffset int) (int, int, uint6
 		post := pos + 4
 		if post < dlen && (data[post] == 0x01 || data[post] == 0x02) &&
 			!hasFamilyAfter(post) &&
-			(hasCompactTrailer(post) || (compactSpeedPos && hasFramedTrailer(post))) {
+			compactSpeedPos && hasCompactTrailer(post) {
 			return pos, 4, uint64(v + 0.5), true, true
 		}
 	}
 	return 0, 0, 0, false, false
+}
+
+func findLegacyChargeFloatSpeed(data []byte, skillOffset int) (int, int, uint64, bool, bool) {
+	if skillOffset+6 > len(data) || data[skillOffset+5] != 0x02 {
+		return 0, 0, 0, false, false
+	}
+	skillID := binary.LittleEndian.Uint32(data[skillOffset : skillOffset+4])
+	if !isHellfireChargeFloatSkill(skillID) {
+		return 0, 0, 0, false, false
+	}
+	start := skillOffset + 12
+	end := skillOffset + 32
+	if end > len(data)-12 {
+		end = len(data) - 12
+	}
+	for pos := start; pos <= end; pos++ {
+		f := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[pos : pos+4])))
+		v := f * 10000
+		if math.IsNaN(f) || math.IsInf(f, 0) || v < 10000 || v >= 40000 {
+			continue
+		}
+		if hasLegacyChargeSpeedTrailer(data, pos+4) {
+			return pos, 4, uint64(v + 0.5), true, true
+		}
+	}
+	return 0, 0, 0, false, false
+}
+
+func isHellfireChargeFloatSkill(skillID uint32) bool {
+	switch skillID {
+	case 15063450, 15063451, 15063452, 15062350, 15062351, 15062352:
+		return true
+	default:
+		return false
+	}
 }
 
 // findSpeedFixed parses the standard cast layout: entity key, 4 position floats,
@@ -407,9 +434,7 @@ func findSpeedAfterPosition(data []byte, skillOffset, pos int) (int, int, uint64
 		upper = dlen
 	}
 	if !bytes.Contains(data[post:upper], famBytes) {
-		if !(isFloat && hasLegacyChargeSpeedTrailer(data, post)) {
-			return 0, 0, 0, false, false
-		}
+		return 0, 0, 0, false, false
 	}
 
 	return pos, speedLen, speed, isFloat, true

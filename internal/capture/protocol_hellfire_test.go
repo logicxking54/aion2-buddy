@@ -118,8 +118,8 @@ func TestFindAttackSpeed_HellfireMaxCompactPosition(t *testing.T) {
 	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, false); ok {
 		t.Fatal("secondary-speed compact trailers are disabled for connection stability")
 	}
-	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, true); ok {
-		t.Fatal("aggressive parser must not accept secondary-speed compact trailers")
+	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, true); !ok {
+		t.Fatal("aggressive parser should accept secondary-speed compact trailers")
 	}
 	if _, _, _, _, ok := findAggressiveSpeedCandidate(data, 0); !ok {
 		t.Fatal("expected diagnostic aggressive candidate for secondary-speed compact trailer")
@@ -129,15 +129,36 @@ func TestFindAttackSpeed_HellfireMaxCompactPosition(t *testing.T) {
 func TestFindAttackSpeed_HellfireCompactFloatTrailer(t *testing.T) {
 	data := mustHex(t, hellfireCompactFloatHex)
 
-	off, n, val, isFloat, ok, fallback := findAttackSpeedOffset(data, 0, false)
+	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, false); ok {
+		t.Fatal("safe parser must not accept legacy charge trailer without family reference")
+	}
+	off, n, val, isFloat, ok, fallback := findAttackSpeedOffset(data, 0, true)
 	if !ok {
 		t.Fatal("expected exact legacy charge trailer to locate compact float speed")
 	}
-	if fallback {
-		t.Fatal("exact legacy charge trailer should be handled by the fixed parser")
+	if !fallback {
+		t.Fatal("legacy charge trailer should report fallback=true")
 	}
 	if !isFloat || off != 25 || n != 4 || val != 19686 {
 		t.Fatalf("expected off=25 len=4 val=19686 float, got off=%d len=%d val=%d float=%t", off, n, val, isFloat)
+	}
+}
+
+func TestFindAttackSpeed_HellfireLegacyChargeFloatSearchAggressiveOnly(t *testing.T) {
+	data := mustHex(t, "9ad9e5001602f89705000100f006380647001c044691db0146f2630440010c1b3800002300")
+
+	if _, _, _, _, ok, _ := findAttackSpeedOffset(data, 0, false); ok {
+		t.Fatal("safe parser must not accept legacy charge float search")
+	}
+	off, n, val, isFloat, ok, fallback := findAttackSpeedOffset(data, 0, true)
+	if !ok {
+		t.Fatal("expected legacy charge float search to locate compact speed")
+	}
+	if !fallback {
+		t.Fatal("legacy charge float search should report fallback=true")
+	}
+	if !isFloat || off != 25 || n != 4 || val != 20686 {
+		t.Fatalf("expected off=25 len=4 val=20686 float, got off=%d len=%d val=%d float=%t", off, n, val, isFloat)
 	}
 }
 

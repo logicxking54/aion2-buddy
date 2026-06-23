@@ -462,8 +462,7 @@ func (e *Engine) SetDecode(on bool) {
 	}
 }
 
-// SetAggressiveParser keeps the UI setting wired, but compact/framed fallback
-// matching is disabled because it can touch the wrong live field and reconnect.
+// SetAggressiveParser toggles compact/framed fallback speed matching.
 func (e *Engine) SetAggressiveParser(on bool) {
 	e.mu.Lock()
 	was := e.aggressive
@@ -471,7 +470,7 @@ func (e *Engine) SetAggressiveParser(on bool) {
 	e.mu.Unlock()
 	if was != on {
 		if on {
-			e.emitLog("Aggressive parser ignored (unsafe fallback disabled)")
+			e.emitLog("Aggressive parser ON")
 		} else {
 			e.emitLog("Aggressive parser OFF")
 		}
