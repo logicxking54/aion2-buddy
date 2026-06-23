@@ -149,6 +149,7 @@ export default {
     detecting: 'กำลังตรวจจับ…',
     active: 'สกิลที่ใช้งาน',
     defaultSpeed: 'โบนัสความเร็วคอมแบตเริ่มต้น %',
+    casterRecord: 'Caster',
     disableAggressiveParser: 'Safe parser (disable aggressive)',
     combatSpeed: 'โบนัสความเร็วคอมแบต %',
     break: 'เบรก',

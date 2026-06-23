@@ -149,6 +149,7 @@ export default {
     detecting: 'detecting…',
     active: 'Active skills',
     defaultSpeed: 'Default combat speed bonus %',
+    casterRecord: 'Caster',
     disableAggressiveParser: 'Safe parser (disable aggressive)',
     combatSpeed: 'Combat speed bonus %',
     break: 'Break',

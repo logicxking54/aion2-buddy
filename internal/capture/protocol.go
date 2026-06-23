@@ -185,15 +185,20 @@ func findAttackSpeedOffset(data []byte, skillOffset int, aggressive bool) (int, 
 	if off, ln, v, fl, ok := findSpeedSearch(data, skillOffset, false); ok {
 		return off, ln, v, fl, ok, true
 	}
-	if !aggressive {
-		return 0, 0, 0, false, false, false
-	}
-	// Safe parser OFF: allow the compact layouts we learned while debugging.
+	// Stable compact layouts promoted into the safe parser baseline after
+	// dungeon testing showed no reconnects.
 	if off, ln, v, fl, ok := findLegacyChargeFloatSpeed(data, skillOffset); ok {
 		return off, ln, v, fl, ok, true
 	}
-	off, ln, v, fl, ok := findAggressiveSpeedCandidate(data, skillOffset)
-	return off, ln, v, fl, ok, ok
+	if off, ln, v, fl, ok := findCompactSpeedCandidate(data, skillOffset); ok {
+		return off, ln, v, fl, ok, true
+	}
+	if !aggressive {
+		return 0, 0, 0, false, false, false
+	}
+	// Safe parser OFF is reserved for new risky rules. Keep the current stable
+	// baseline above this branch so future experiments cannot disturb it.
+	return 0, 0, 0, false, false, false
 }
 
 // findSpeedSearch handles compact casts whose position block is not four floats.
@@ -248,10 +253,7 @@ func findSpeedSearch(data []byte, skillOffset int, _ bool) (int, int, uint64, bo
 	return 0, 0, 0, false, false
 }
 
-// findAggressiveSpeedCandidate detects the old unsafe aggressive fallback
-// candidates for diagnostics only. Callers must not edit this offset: these
-// trailer-only matches can be false positives in live traffic.
-func findAggressiveSpeedCandidate(data []byte, skillOffset int) (int, int, uint64, bool, bool) {
+func findCompactSpeedCandidate(data []byte, skillOffset int) (int, int, uint64, bool, bool) {
 	dlen := len(data)
 	skillID := binary.LittleEndian.Uint32(data[skillOffset : skillOffset+4])
 	isHellfireMax := skillID == 15063453 || skillID == 15062353
@@ -301,6 +303,66 @@ func findAggressiveSpeedCandidate(data []byte, skillOffset int) (int, int, uint6
 		}
 	}
 	return 0, 0, 0, false, false
+}
+
+func findRiskySpeedCandidate(data []byte, skillOffset int) (int, int, uint64, bool, string, bool) {
+	dlen := len(data)
+	if skillOffset+6 > dlen {
+		return 0, 0, 0, false, "", false
+	}
+	skillID := binary.LittleEndian.Uint32(data[skillOffset : skillOffset+4])
+	isHellfireMax := skillID == 15063453 || skillID == 15062353
+	start := skillOffset + 6
+	end := start + 90
+	if end > dlen-5 {
+		end = dlen - 5
+	}
+	famBytes := data[skillOffset+1 : skillOffset+4]
+	hasFamilyAfter := func(post int) bool {
+		upper := post + 48
+		if upper > dlen {
+			upper = dlen
+		}
+		return bytes.Contains(data[post:upper], famBytes)
+	}
+	hasFramedTrailer := func(post int) bool {
+		start := post + 1
+		for start < dlen && data[start] == 0 && start < post+5 {
+			start++
+		}
+		if start >= dlen {
+			return false
+		}
+		declared, lenBytes := parseVarint(data, start)
+		if lenBytes <= 0 || declared > uint64(dlen) {
+			return false
+		}
+		recordLen := int(declared) + lenBytes - 4
+		return recordLen >= lenBytes+2 && start+recordLen <= dlen
+	}
+	for pos := start; pos < end; pos++ {
+		if v, ln := parseVarint(data, pos); v >= 10000 && v < 40000 {
+			post := pos + ln
+			if post < dlen && (data[post] == 0x01 || data[post] == 0x02) &&
+				!hasFamilyAfter(post) && hasFramedTrailer(post) {
+				return pos, ln, v, false, "framed", true
+			}
+		}
+		if isHellfireMax {
+			continue
+		}
+		f := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[pos : pos+4])))
+		v := f * 10000
+		if math.IsNaN(f) || math.IsInf(f, 0) || v < 10000 || v >= 40000 {
+			continue
+		}
+		post := pos + 4
+		if post < dlen && (data[post] == 0x01 || data[post] == 0x02) &&
+			!hasFamilyAfter(post) && hasFramedTrailer(post) {
+			return pos, 4, uint64(v + 0.5), true, "framed-float", true
+		}
+	}
+	return 0, 0, 0, false, "", false
 }
 
 func findLegacyChargeFloatSpeed(data []byte, skillOffset int) (int, int, uint64, bool, bool) {

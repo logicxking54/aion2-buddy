@@ -1140,6 +1140,9 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		if casterFilter != 0 && caster != 0 && caster != casterFilter {
 			continue
 		}
+		if is02 && caster != 0 {
+			e.fire("capture:caster", caster)
+		}
 
 		// Caster (entity) + skill id suffix for every log line.
 		casterOnly := fmt.Sprintf(" [caster:%d, id:%d]", caster, hh.id)
@@ -1386,10 +1389,19 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			if hh.offset+6+16+4 > len(payload) {
 				reason = "truncated/segmented"
 			}
-			if aggressive {
-				if candOff, candLen, candVal, candFloat, candOK := findAggressiveSpeedCandidate(payload, hh.offset); candOK {
-					e.emitMiss(fmt.Sprintf("AGGRESSIVE_CANDIDATE %s off=%d len=%d val=%d float=%t%s", name, candOff, candLen, candVal, candFloat, casterStr), payload, hh.offset)
-					reason = "unsafe-aggressive-candidate"
+			if aggressive && isHellfireName(name) {
+				if candOff, candLen, candVal, candFloat, candKind, candOK := findRiskySpeedCandidate(payload, hh.offset); candOK {
+					post := candOff + candLen
+					trailerEnd := post + 16
+					if trailerEnd > len(payload) {
+						trailerEnd = len(payload)
+					}
+					trailerHex := ""
+					if post < trailerEnd {
+						trailerHex = hex.EncodeToString(payload[post:trailerEnd])
+					}
+					e.emitMiss(fmt.Sprintf("AGGRESSIVE_CANDIDATE %s kind=%s off=%d rel=%d len=%d val=%d float=%t trailer=%s%s", name, candKind, candOff, candOff-hh.offset, candLen, candVal, candFloat, trailerHex, casterStr), payload, hh.offset)
+					reason = "risky-candidate"
 				}
 			}
 			e.emitMiss(fmt.Sprintf("MISS %s (%s)%s", name, reason, casterStr), payload, hh.offset)

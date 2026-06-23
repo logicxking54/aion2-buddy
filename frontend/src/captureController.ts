@@ -3,7 +3,7 @@
 // it keeps the engine in sync with the shared `config` store, so any menu can
 // edit settings and the running capture updates automatically.
 import { reactive, ref, watch } from 'vue'
-import { config, loadConfig } from './config'
+import { config, loadConfig, saveConfig } from './config'
 import { i18n } from './i18n'
 import { skills, relatedSkillIds } from './projects/pingmaker/skills'
 import {
@@ -66,6 +66,21 @@ export function clearLogs() {
   logs.splice(0, logs.length)
 }
 
+const casterLogPattern = /\[caster:(\d+),/
+
+function captureLogAllowed(msg: string): boolean {
+  if (msg.startsWith('ACT')) return true
+  const caster = config.casterRecord
+  if (!Number.isFinite(caster) || caster <= 0) return true
+  return Number(msg.match(casterLogPattern)?.[1] ?? 0) === caster
+}
+
+function pruneCaptureLogs() {
+  for (let i = logs.length - 1; i >= 0; i--) {
+    if (!captureLogAllowed(logs[i].msg)) logs.splice(i, 1)
+  }
+}
+
 // Build the engine config (SkillSpeed[]) from the persisted rows + skill catalog.
 function buildConfig(): SkillSpeed[] {
   const byId = new Map(skills.map((s) => [s.id, s]))
@@ -107,7 +122,10 @@ export async function initCapture() {
   if (inited) return
   inited = true
 
-  EventsOn('capture:log', (m: string) => log(String(m), String(m).startsWith('ACT') ? 'cast' : 'info'))
+  EventsOn('capture:log', (m: string) => {
+    const msg = String(m)
+    if (captureLogAllowed(msg)) log(msg, msg.startsWith('ACT') ? 'cast' : 'info')
+  })
   EventsOn('capture:status', (s: string) => {
     status.value = s as 'idle' | 'running' | 'error'
     running.value = s === 'running'
@@ -126,6 +144,12 @@ export async function initCapture() {
   })
   EventsOn('capture:ping', (p: number) => {
     ping.value = p ?? 0
+  })
+  EventsOn('capture:caster', (caster: number) => {
+    if (!Number.isFinite(caster) || caster <= 0 || config.casterRecord === caster) return
+    config.casterRecord = caster
+    pruneCaptureLogs()
+    saveConfig()
   })
   EventsOn('capture:cast', (c: { id: number }) => {
     if (!c || typeof c.id !== 'number') return

@@ -19,6 +19,18 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.0.7',
+    changes: [
+      { en: 'Added caster data recording and caster-prioritized Ping Maker logs', th: 'เพิ่มการบันทึกข้อมูล Caster และกรองบันทึก Ping Maker ตาม Caster' },
+    ],
+  },
+  {
+    version: '1.0.6',
+    changes: [
+      { en: 'Improved Ping Maker compact-speed parsing for party play and reduced reconnect risk', th: 'ปรับปรุง Ping Maker สำหรับปาร์ตี้ ลดโอกาส reconnect และจับ compact speed ได้ดีขึ้น' },
+    ],
+  },
+  {
     version: '1.0.5',
     changes: [
       { en: 'Improved Ping Maker to work well in party dungeons', th: 'ปรับปรุง Ping Maker ให้ทำงานได้ดีในปาร์ตี้ดันเจี้ยน' },

@@ -55,6 +55,7 @@ export interface AppConfig {
   character: string
   defaultSpeed: number
   disableAggressiveParser: boolean // checked = safer parser; unchecked = aggressive compact fallback
+  casterRecord: number // last caster entity key observed from an ACT cast
   panelHeight: number
   overlay: boolean // overlay mode: window pinned above the game; UI adapts when on
   devMode: boolean // show developer-only menus (e.g. Packet Inspector)
@@ -76,6 +77,7 @@ export const config = reactive<AppConfig>({
   character: localStorage.getItem('aion2-character') ?? '',
   defaultSpeed: 250,
   disableAggressiveParser: true,
+  casterRecord: 0,
   panelHeight: 300,
   overlay: false,
   devMode: false,
@@ -111,6 +113,7 @@ async function doLoad(): Promise<void> {
         const data = JSON.parse(raw)
         if (data && typeof data === 'object') Object.assign(config, data)
         if (typeof config.disableAggressiveParser !== 'boolean') config.disableAggressiveParser = true
+        if (typeof config.casterRecord !== 'number') config.casterRecord = 0
         // Backfill nested oversize defaults: Object.assign overwrites the whole
         // `oversize` object, so configs saved before a field existed would lack
         // it (e.g. gameIPs), crashing the menu. Defaults first, saved values win.
