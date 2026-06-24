@@ -10,7 +10,8 @@ import {
   captureAvailable,
   EventsOn,
   isCapturing,
-  setAggressiveParser,
+  setCasterAutoDetect,
+  setCasterFilter,
   setCatalog,
   startCapture,
   stopCapture,
@@ -33,6 +34,19 @@ export const ping = ref(0)
 export const errorMsg = ref('')
 export const gameDetected = ref(false)
 export const logs = reactive<LogEntry[]>([])
+
+// Caster auto-detect: true while the engine is counting ACTs to find your caster.
+export const casterAutoDetecting = ref(false)
+export async function startCasterAutoDetect() {
+  if (!captureAvailable()) return
+  if (!running.value) await start()
+  await setCasterAutoDetect(true).catch(() => {})
+  casterAutoDetecting.value = true
+}
+export async function stopCasterAutoDetect() {
+  await setCasterAutoDetect(false).catch(() => {})
+  casterAutoDetecting.value = false
+}
 
 // Recently used skills (newest first), for the overlay HUD. Each cast is a
 // numeric skill id; the UI maps it to a Skill for image/name.
@@ -90,7 +104,9 @@ function buildConfig(): SkillSpeed[] {
     if (sk) {
       // relatedSkillIds expands charge skills (e.g. Hellfire) to cover every
       // charge tier — the charged cast fires under a tier ID, not the base.
-      out.push({ name: sk.name, ids: relatedSkillIds(sk), speedPct: r.speedPct || 0, break: r.brk, override: r.overridden })
+      // primaryIds = this row's own tier ids, so the engine lets an explicit
+      // tier row (e.g. Hellfire - Max) override the expanded fallback.
+      out.push({ name: sk.name, ids: relatedSkillIds(sk), primaryIds: sk.skill_ids, speedPct: r.speedPct || 0, break: r.brk, override: r.overridden })
     }
   }
   return out
@@ -145,11 +161,14 @@ export async function initCapture() {
   EventsOn('capture:ping', (p: number) => {
     ping.value = p ?? 0
   })
-  EventsOn('capture:caster', (caster: number) => {
-    if (!Number.isFinite(caster) || caster <= 0 || config.casterRecord === caster) return
+  // Caster auto-detect found your caster: drop it into the filter field (the
+  // casterRecord watcher pushes it to the engine + persists), then stop.
+  EventsOn('capture:caster-auto', (caster: number) => {
+    if (!Number.isFinite(caster) || caster <= 0) return
     config.casterRecord = caster
-    pruneCaptureLogs()
     saveConfig()
+    casterAutoDetecting.value = false
+    log('Auto-detected caster ' + caster, 'info')
   })
   EventsOn('capture:cast', (c: { id: number }) => {
     if (!c || typeof c.id !== 'number') return
@@ -165,11 +184,6 @@ export async function initCapture() {
   EventsOn('game:status', (v: boolean) => {
     gameDetected.value = !!v
   })
-  EventsOn('arduino:log', (e: { msg: string; kind: LogKind }) => {
-    log(e?.msg ?? '', (e?.kind as LogKind) ?? 'info')
-  })
-  // Oversize Network log lines share the global (bottom) log.
-  EventsOn('oversize:log', (m: string) => log(String(m)))
   // Mod menu file-operation lines (e.g. intro remove/restore) share the log box.
   EventsOn('mod:log', (m: string) => log(String(m)))
 
@@ -189,7 +203,6 @@ export async function initCapture() {
   await loadConfig()
   if (captureAvailable()) {
     setCatalog(skills.map((s) => ({ name: s.name, ids: s.skill_ids }))).catch(() => {})
-    setAggressiveParser(!config.disableAggressiveParser).catch(() => {})
     running.value = await isCapturing()
     if (running.value) status.value = 'running'
   }
@@ -203,10 +216,16 @@ export async function initCapture() {
     { deep: true },
   )
 
+  // Manual caster filter: the user types the caster entity key (0/blank = all).
+  // Pushes the value to the engine (only that caster is edited/logged) and
+  // re-applies the log filter so stale lines from other casters are dropped.
   watch(
-    [() => config.disableAggressiveParser, running],
+    [() => config.casterRecord, running],
     () => {
-      if (captureAvailable()) setAggressiveParser(!config.disableAggressiveParser).catch(() => {})
+      const c = Number(config.casterRecord)
+      const id = Number.isFinite(c) && c > 0 ? c : 0
+      if (captureAvailable()) setCasterFilter(id).catch(() => {})
+      pruneCaptureLogs()
     },
     { immediate: true },
   )

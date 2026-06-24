@@ -4,9 +4,9 @@ import {capture} from '../models';
 
 export function IsCapturing():Promise<boolean>;
 
-export function SetAggressiveParser(arg1:boolean):Promise<void>;
-
 export function SetAuto(arg1:boolean,arg2:number,arg3:number):Promise<void>;
+
+export function SetCasterAutoDetect(arg1:boolean):Promise<void>;
 
 export function SetCasterFilter(arg1:number):Promise<void>;
 
@@ -21,6 +21,8 @@ export function SetComboTest(arg1:boolean):Promise<void>;
 export function SetDecode(arg1:boolean):Promise<void>;
 
 export function SetInspect(arg1:boolean,arg2:boolean):Promise<void>;
+
+export function SetSessionRecord(arg1:boolean):Promise<string>;
 
 export function StartCapture(arg1:Array<capture.SkillSpeed>):Promise<void>;
 

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { EventsOn, setInspect, setComboTest, setDecode } from '../pingmaker/capture'
+import { EventsOn, setInspect, setComboTest, setDecode, setSessionRecord } from '../pingmaker/capture'
 import { running, start, stop, log } from '../../captureController'
 
 const { t } = useI18n()
@@ -24,6 +24,29 @@ const decodeOn = ref(false)
 function toggleDecode() {
   decodeOn.value = !decodeOn.value
   setDecode(decodeOn.value).catch(() => {})
+}
+
+// Record EVERY raw packet (in + out, all sizes, original pre-edit bytes) of the
+// whole session to a JSONL file on disk — uncapped, for offline analysis of why
+// some edits fail in a party (buffed packet shapes, TCP segmentation, etc.).
+// Independent of the inspect list; keeps running across menus until stopped or
+// capture stops.
+const recordOn = ref(false)
+async function toggleRecord() {
+  if (!recordOn.value) {
+    if (!running.value) await start()
+    try {
+      const path = await setSessionRecord(true)
+      recordOn.value = true
+      log(path ? 'Recording session → ' + path : 'Recording session…', 'info')
+    } catch (err: any) {
+      log('Record failed: ' + String(err?.message ?? err), 'warn')
+    }
+  } else {
+    await setSessionRecord(false).catch(() => {})
+    recordOn.value = false
+    log('Session recording stopped', 'info')
+  }
 }
 
 interface Entry {
@@ -164,6 +187,14 @@ onUnmounted(() => {
         class="rounded-md px-3 py-1 text-xs font-semibold transition"
         :class="decodeOn ? 'bg-sky-500/20 text-sky-300 ring-1 ring-sky-400/30' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
       >{{ decodeOn ? '● Decode ON' : 'Decode' }}</button>
+
+      <button
+        type="button"
+        @click="toggleRecord"
+        title="Record every raw packet (in + out) of the whole session to a JSONL file for offline analysis — uncapped, written straight to disk"
+        class="rounded-md px-3 py-1 text-xs font-semibold transition"
+        :class="recordOn ? 'bg-red-500/20 text-red-300 ring-1 ring-red-400/30' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
+      >{{ recordOn ? '● Recording' : 'Record session' }}</button>
 
       <button
         type="button"

@@ -1,8 +1,16 @@
 import skillData from './skills.data.json'
 
-// The three Aion 2 archetypes used to filter the skill list. A skill's `class`
-// is an array of these ids — one skill can belong to several classes.
-export type SkillClass = 'sorcerer'
+// Aion 2 class ids used to filter the skill list. These must match the
+// `class` values stored in skills.data.json.
+export type SkillClass =
+  | 'Sorcerer'
+  | 'Gladiator'
+  | 'Templar'
+  | 'Assassin'
+  | 'Ranger'
+  | 'Spiritmaster'
+  | 'Cleric'
+  | 'Chanter'
 
 export interface ClassMeta {
   id: SkillClass
@@ -12,7 +20,14 @@ export interface ClassMeta {
 }
 
 export const classes: ClassMeta[] = [
-  { id: 'sorcerer', label: 'Sorcerer', icon: '🔮', color: '#a855f7' },
+  { id: 'Sorcerer', label: 'Sorcerer', icon: 'https://assets.playnccdn.com/static-aion2-gamedata/resources/ICON_SO_SKILL_006.png', color: '#a855f7' },
+  { id: 'Gladiator', label: 'Gladiator', icon: 'https://assets.playnccdn.com/static-aion2-gamedata/resources/ICON_GL_SKILL_024.png', color: '#ef4444' },
+  { id: 'Templar', label: 'Templar', icon: 'https://assets.playnccdn.com/static-aion2-gamedata/resources/ICON_TE_SKILL_001.png', color: '#f59e0b' },
+  { id: 'Assassin', label: 'Assassin', icon: 'https://assets.playnccdn.com/static-aion2-gamedata/resources/ICON_AS_SKILL_035.png', color: '#22c55e' },
+  { id: 'Ranger', label: 'Ranger', icon: 'https://assets.playnccdn.com/static-aion2-gamedata/resources/ICON_RA_SKILL_008.png', color: '#14b8a6' },
+  { id: 'Spiritmaster', label: 'Spiritmaster', icon: 'https://assets.playnccdn.com/static-aion2-gamedata/resources/ICON_EL_SKILL_001.png', color: '#06b6d4' },
+  { id: 'Cleric', label: 'Cleric', icon: 'https://assets.playnccdn.com/static-aion2-gamedata/resources/ICON_CL_SKILL_001.png', color: '#eab308' },
+  { id: 'Chanter', label: 'Chanter', icon: 'https://assets.playnccdn.com/static-aion2-gamedata/resources/ICON_CH_SKILL_010.png', color: '#f97316' },
 ]
 
 export interface Skill {

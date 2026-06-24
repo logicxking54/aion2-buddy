@@ -95,9 +95,10 @@ func (c *Capture) SetDecode(on bool) {
 	c.engine.SetDecode(on)
 }
 
-// SetAggressiveParser toggles compact/framed fallback speed matching.
-func (c *Capture) SetAggressiveParser(on bool) {
-	c.engine.SetAggressiveParser(on)
+// SetSessionRecord toggles raw-packet recording of the whole session to a JSONL
+// file (for offline analysis). Returns the file path when starting.
+func (c *Capture) SetSessionRecord(on bool) (string, error) {
+	return c.engine.SetSessionRecord(on)
 }
 
 // SetCasterMask toggles the FPS-saver mask: the engine rewrites every OTHER
@@ -113,6 +114,13 @@ func (c *Capture) SetCasterMask(on bool, keepCaster uint64, dodgeID uint32) {
 // is ignored. id == 0 clears it. The frontend pushes the (auto/manual) field value.
 func (c *Capture) SetCasterFilter(id uint64) {
 	c.engine.SetCasterFilter(id)
+}
+
+// SetCasterAutoDetect starts/stops caster auto-detection. While on, the engine
+// counts ACT casts per caster and emits "capture:caster-auto" with the first
+// caster to pass the threshold (then auto-stops).
+func (c *Capture) SetCasterAutoDetect(on bool) {
+	c.engine.SetCasterAutoDetect(on)
 }
 
 // IsCapturing reports whether capture is currently running.

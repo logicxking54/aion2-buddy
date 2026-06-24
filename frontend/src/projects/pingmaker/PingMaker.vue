@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { classes, skills, skillColor, type Skill, type SkillClass } from './skills'
 import errorImage from '../../assets/images/skill-error.svg'
 import { config, loadConfig, saveConfig } from '../../config'
+import { casterAutoDetecting, startCasterAutoDetect, stopCasterAutoDetect } from '../../captureController'
 
 const { t } = useI18n()
 
@@ -150,7 +151,8 @@ onMounted(async () => {
           :class="activeClass === c.id ? 'text-white ring-1' : 'text-slate-300 hover:bg-white/5'"
           :style="activeClass === c.id ? { backgroundColor: c.color + '22', boxShadow: 'inset 0 0 0 1px ' + c.color } : {}"
         >
-          <span>{{ c.icon }}</span>{{ classLabel(c.id) }}
+          <img :src="c.icon" @error="onImgError" alt="" class="h-5 w-5 rounded object-cover ring-1 ring-white/10" />
+          {{ classLabel(c.id) }}
         </button>
       </div>
 
@@ -217,16 +219,26 @@ onMounted(async () => {
       </div>
 
       <div class="mt-2 flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-ink-800 px-3 py-2 text-xs font-semibold text-slate-300">
-        <span>{{ t('ping.casterRecord') }}: <span class="text-white">{{ config.casterRecord || '-' }}</span></span>
-        <label v-if="config.devMode" class="flex shrink-0 items-center gap-2">
-          <span>{{ t('ping.disableAggressiveParser') }}</span>
+        <label class="flex items-center gap-2">
+          <span>{{ t('ping.casterRecord') }}</span>
           <input
-            v-model="config.disableAggressiveParser"
+            v-model.number="config.casterRecord"
             @change="saveConfig"
-            type="checkbox"
-            class="h-4 w-4 rounded border-white/20 bg-ink-900 text-accent focus:ring-accent/40"
+            type="number"
+            min="0"
+            placeholder="-"
+            class="w-28 rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-right text-sm text-white outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
           />
         </label>
+        <button
+          type="button"
+          @click="casterAutoDetecting ? stopCasterAutoDetect() : startCasterAutoDetect()"
+          :title="t('ping.casterAutoHint')"
+          class="shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold transition"
+          :class="casterAutoDetecting
+            ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/30'
+            : 'bg-accent/15 text-accent hover:bg-accent/25'"
+        >{{ casterAutoDetecting ? '● ' + t('ping.casterAutoStop') : t('ping.casterAuto') }}</button>
       </div>
 
       <!-- Search added skills -->

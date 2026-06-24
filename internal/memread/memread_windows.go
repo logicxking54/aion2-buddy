@@ -9,9 +9,8 @@
 // memory writes, no thread creation, no input injection — which keeps the
 // behavioural footprint as small as a read-only tool can be.
 //
-// The module is deliberately isolated from the packet-capture path (see the
-// oversize package for the same isolation rationale) so that enabling memory
-// reading is an explicit, opt-in code path.
+// The module is deliberately isolated from the packet-capture path so that
+// enabling memory reading is an explicit, opt-in code path.
 package memread
 
 import (

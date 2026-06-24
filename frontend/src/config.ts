@@ -10,59 +10,16 @@ export interface SavedRow {
   brk: boolean
 }
 
-export interface SavedAuto {
-  id: string
-  key: string
-  delay: number
-}
-// Screen rectangle (physical pixels) for one skill's icon on the in-game bar.
-export interface ScreenRect {
-  x: number
-  y: number
-  w: number
-  h: number
-}
-export interface SavedSequence {
-  triggerId: string | null
-  triggerRect: ScreenRect | null // where the trigger skill's icon sits on screen
-  autos: SavedAuto[]
-}
-// Screen-reading monitor: each skill has its own rectangle; a skill is "ready"
-// when its rectangle's average brightness exceeds `threshold`.
-export interface SkillbarConfig {
-  threshold: number
-}
-export interface AutoHotkeyConfig {
-  board: string
-  sequences: SavedSequence[]
-  skillbar: SkillbarConfig
-}
-
-// Oversize Network: WinTUN VPN settings. The relay daemon is deployed to the VM
-// over SSH (ip/port/user/password); `key` is the tunnel key returned by deploy.
-export interface OversizeConfig {
-  ip: string
-  port: number
-  user: string
-  password: string
-  key: string // tunnel key (hex) from "Deploy server"; required to connect
-  fullTunnel: boolean // true = route all traffic; false = only Aion 2 servers (split)
-  gameIPs: string[] // learned Aion 2 server IPs; pre-routed on connect in split mode
-}
-
 export interface AppConfig {
   language: 'th' | 'en'
   character: string
   defaultSpeed: number
-  disableAggressiveParser: boolean // checked = safer parser; unchecked = aggressive compact fallback
-  casterRecord: number // last caster entity key observed from an ACT cast
+  casterRecord: number // manual caster-filter entity key (0 = all casters)
   panelHeight: number
   overlay: boolean // overlay mode: window pinned above the game; UI adapts when on
   devMode: boolean // show developer-only menus (e.g. Packet Inspector)
   casterMask: boolean // FPS mask: rewrite other players' casts to Dodge (dev-only)
   rows: SavedRow[]
-  autoHotkey: AutoHotkeyConfig
-  oversize: OversizeConfig
 }
 
 // Seed defaults from the legacy localStorage keys so existing settings migrate
@@ -76,15 +33,12 @@ export const config = reactive<AppConfig>({
   language: initialLanguage(),
   character: localStorage.getItem('aion2-character') ?? '',
   defaultSpeed: 250,
-  disableAggressiveParser: true,
   casterRecord: 0,
   panelHeight: 300,
   overlay: false,
   devMode: false,
   casterMask: false,
   rows: [],
-  autoHotkey: { board: '', sequences: [], skillbar: { threshold: 60 } },
-  oversize: { ip: '104.199.243.60', port: 22, user: 'root', password: '123123Zz', key: '', fullTunnel: true, gameIPs: [] },
 })
 
 interface AppBackend {
@@ -112,22 +66,7 @@ async function doLoad(): Promise<void> {
       if (raw) {
         const data = JSON.parse(raw)
         if (data && typeof data === 'object') Object.assign(config, data)
-        if (typeof config.disableAggressiveParser !== 'boolean') config.disableAggressiveParser = true
         if (typeof config.casterRecord !== 'number') config.casterRecord = 0
-        // Backfill nested oversize defaults: Object.assign overwrites the whole
-        // `oversize` object, so configs saved before a field existed would lack
-        // it (e.g. gameIPs), crashing the menu. Defaults first, saved values win.
-        config.oversize = {
-          ip: '104.199.243.60',
-          port: 22,
-          user: 'root',
-          password: '123123Zz',
-          key: '',
-          fullTunnel: true,
-          gameIPs: [],
-          ...(config.oversize as Partial<OversizeConfig>),
-        }
-        if (!Array.isArray(config.oversize.gameIPs)) config.oversize.gameIPs = []
       }
     } catch {
       // ignore malformed config

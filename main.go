@@ -16,9 +16,6 @@ func main() {
 	// Create an instance of the app structure
 	app := NewApp()
 	captureBinding := NewCapture()
-	arduinoBinding := NewArduino()
-	screenBinding := NewScreen()
-	oversizeBinding := NewOversize()
 	memReadBinding := NewMemRead()
 	modBinding := NewMod()
 
@@ -36,18 +33,12 @@ func main() {
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
 			captureBinding.setContext(ctx)
-			arduinoBinding.setContext(ctx)
-			screenBinding.setContext(ctx)
-			oversizeBinding.setContext(ctx)
 			memReadBinding.setContext(ctx)
 			modBinding.setContext(ctx)
 		},
 		Bind: []interface{}{
 			app,
 			captureBinding,
-			arduinoBinding,
-			screenBinding,
-			oversizeBinding,
 			memReadBinding,
 			modBinding,
 		},

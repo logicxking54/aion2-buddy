@@ -6,12 +6,12 @@ export function IsCapturing() {
   return window['go']['main']['Capture']['IsCapturing']();
 }
 
-export function SetAggressiveParser(arg1) {
-  return window['go']['main']['Capture']['SetAggressiveParser'](arg1);
-}
-
 export function SetAuto(arg1, arg2, arg3) {
   return window['go']['main']['Capture']['SetAuto'](arg1, arg2, arg3);
+}
+
+export function SetCasterAutoDetect(arg1) {
+  return window['go']['main']['Capture']['SetCasterAutoDetect'](arg1);
 }
 
 export function SetCasterFilter(arg1) {
@@ -40,6 +40,10 @@ export function SetDecode(arg1) {
 
 export function SetInspect(arg1, arg2) {
   return window['go']['main']['Capture']['SetInspect'](arg1, arg2);
+}
+
+export function SetSessionRecord(arg1) {
+  return window['go']['main']['Capture']['SetSessionRecord'](arg1);
 }
 
 export function StartCapture(arg1) {

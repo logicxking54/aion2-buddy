@@ -7,6 +7,7 @@ import { EventsOn } from '../../../wailsjs/runtime/runtime'
 export interface SkillSpeed {
   name: string
   ids: number[]
+  primaryIds: number[] // this row's own tier ids; override the expanded fallback
   speedPct: number
   break: boolean
   override: boolean
@@ -26,9 +27,10 @@ interface CaptureBackend {
   SetInspect(on: boolean, all: boolean): Promise<void>
   SetComboTest(on: boolean): Promise<void>
   SetDecode(on: boolean): Promise<void>
-  SetAggressiveParser(on: boolean): Promise<void>
+  SetSessionRecord(on: boolean): Promise<string>
   SetCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void>
   SetCasterFilter(id: number): Promise<void>
+  SetCasterAutoDetect(on: boolean): Promise<void>
   IsCapturing(): Promise<boolean>
 }
 
@@ -81,9 +83,12 @@ export async function setDecode(on: boolean): Promise<void> {
   if (b) await b.SetDecode(on)
 }
 
-export async function setAggressiveParser(on: boolean): Promise<void> {
+// setSessionRecord toggles raw-packet recording of the whole session to a JSONL
+// file. Returns the file path when starting (empty string otherwise).
+export async function setSessionRecord(on: boolean): Promise<string> {
   const b = backend()
-  if (b) await b.SetAggressiveParser(on)
+  if (!b) return ''
+  return await b.SetSessionRecord(on)
 }
 
 export async function setCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void> {
@@ -94,6 +99,13 @@ export async function setCasterMask(on: boolean, keepCaster: number, dodgeID: nu
 export async function setCasterFilter(id: number): Promise<void> {
   const b = backend()
   if (b) await b.SetCasterFilter(id)
+}
+
+// setCasterAutoDetect starts/stops caster auto-detection. The backend emits
+// 'capture:caster-auto' with the detected caster id when one passes the threshold.
+export async function setCasterAutoDetect(on: boolean): Promise<void> {
+  const b = backend()
+  if (b) await b.SetCasterAutoDetect(on)
 }
 
 export async function isCapturing(): Promise<boolean> {

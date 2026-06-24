@@ -17,6 +17,7 @@ export namespace capture {
 	export class SkillSpeed {
 	    name: string;
 	    ids: number[];
+	    primaryIds: number[];
 	    speedPct: number;
 	    break: boolean;
 	    override: boolean;
@@ -29,6 +30,7 @@ export namespace capture {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.ids = source["ids"];
+	        this.primaryIds = source["primaryIds"];
 	        this.speedPct = source["speedPct"];
 	        this.break = source["break"];
 	        this.override = source["override"];
@@ -231,29 +233,6 @@ export namespace memread {
 	        this.attached = source["attached"];
 	        this.pid = source["pid"];
 	        this.error = source["error"];
-	    }
-	}
-
-}
-
-export namespace screen {
-	
-	export class Rect {
-	    x: number;
-	    y: number;
-	    w: number;
-	    h: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new Rect(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.x = source["x"];
-	        this.y = source["y"];
-	        this.w = source["w"];
-	        this.h = source["h"];
 	    }
 	}
 

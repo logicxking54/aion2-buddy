@@ -24,9 +24,9 @@ var winDivertSysBytes []byte
 var driverReady bool
 
 // EnsureDriver extracts the embedded WinDivert driver and registers it on the
-// DLL search path. Exported so sibling packages (e.g. internal/oversize, which
-// opens its own WinDivert handle for the relay redirect) can reuse the same
-// embedded driver instead of shipping a second copy. Safe to call repeatedly.
+// DLL search path. Exported so sibling packages that open their own WinDivert
+// handle can reuse the same embedded driver instead of shipping a second copy.
+// Safe to call repeatedly.
 func EnsureDriver() error { return prepareDriver() }
 
 // prepareDriver extracts the embedded WinDivert files to a temp directory (if

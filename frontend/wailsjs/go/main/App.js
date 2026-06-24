@@ -10,10 +10,6 @@ export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
 
-export function ListSerialPorts() {
-  return window['go']['main']['App']['ListSerialPorts']();
-}
-
 export function LoadConfig() {
   return window['go']['main']['App']['LoadConfig']();
 }
