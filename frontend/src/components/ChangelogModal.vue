@@ -19,6 +19,12 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.1.2',
+    changes: [
+      { en: 'Fixed caster auto-detect in party play — it now locks onto your own caster instantly from your edit-list skills, instead of flipping to teammates and skipping your speed edits', th: 'แก้ caster auto-detect ในปาร์ตี้ — ล็อก caster ของคุณทันทีจากสกิลใน edit list แทนที่จะสลับไปหาเพื่อนจนข้ามการแก้ speed ของคุณ' },
+    ],
+  },
+  {
     version: '1.1.1',
     changes: [
       { en: 'Removed the Overlay (always-on-top HUD) mode', th: 'เอาโหมด Overlay (ปักหมุดหน้าต่างทับเกม) ออก' },

@@ -168,32 +168,31 @@ type Engine struct {
 	cfgFirstBytes map[byte]struct{}
 	lookup        map[uint32]skillCfg
 	// Full catalog (all known skills) — used to log every cast, not just configured ones.
-	catIDs          map[uint32]struct{}
-	catFirstBytes   map[byte]struct{}
-	idToName        map[uint32]string
-	recentUsed      map[uint64]int64 // dedupe "used" log lines per (skill, action tick)
-	lastActAt       map[uint32]int64 // last 0x02 ACT time per skill id (guards 0x00 buff casts)
-	tracker         *entityTracker   // character-name filter ("only my skills")
-	reasm           streamReassembler
-	curPorts        map[int]struct{} // server/proxy ports of the active handle (for direction)
-	lastReqByConn   map[int]int64    // client port -> last outbound time (ns), for RTT
-	lastReqPkt      map[int][]byte   // client port -> last outbound payload, for request decoding
-	autoMode        bool             // compute bonus from ping instead of per-skill field
-	autoBase        float64          // packet add at 0ms ping
-	autoPerMs       float64          // extra packet add per ms of ping
-	pingEWMA        float64          // smoothed ping (ms); written only by packet goroutine
-	pingHasValue    bool
-	lastPingEmit    int64
-	inspect         bool           // packet inspector enabled
-	inspectAll      bool           // true = dump every inbound packet; false = only skill casts
-	inspectCount    int64          // emitted-message counter (capped)
-	decode          bool           // print all decoded fields for each cast
-	maskOn          bool           // FPS mask: rewrite other players' cast skill_id to Dodge
-	maskKeep        uint64         // your caster (entity key) left untouched; 0 = not locked yet
-	maskDodge       uint32         // skill_id written over masked casts (a no-VFX Dodge id)
-	casterFilter    uint64         // engine-level caster filter: only this caster is processed; 0 = all
-	casterAutoCount map[uint64]int // per-caster ACT tally for always-on auto-detect
-	running         bool
+	catIDs        map[uint32]struct{}
+	catFirstBytes map[byte]struct{}
+	idToName      map[uint32]string
+	recentUsed    map[uint64]int64 // dedupe "used" log lines per (skill, action tick)
+	lastActAt     map[uint32]int64 // last 0x02 ACT time per skill id (guards 0x00 buff casts)
+	tracker       *entityTracker   // character-name filter ("only my skills")
+	reasm         streamReassembler
+	curPorts      map[int]struct{} // server/proxy ports of the active handle (for direction)
+	lastReqByConn map[int]int64    // client port -> last outbound time (ns), for RTT
+	lastReqPkt    map[int][]byte   // client port -> last outbound payload, for request decoding
+	autoMode      bool             // compute bonus from ping instead of per-skill field
+	autoBase      float64          // packet add at 0ms ping
+	autoPerMs     float64          // extra packet add per ms of ping
+	pingEWMA      float64          // smoothed ping (ms); written only by packet goroutine
+	pingHasValue  bool
+	lastPingEmit  int64
+	inspect       bool   // packet inspector enabled
+	inspectAll    bool   // true = dump every inbound packet; false = only skill casts
+	inspectCount  int64  // emitted-message counter (capped)
+	decode        bool   // print all decoded fields for each cast
+	maskOn        bool   // FPS mask: rewrite other players' cast skill_id to Dodge
+	maskKeep      uint64 // your caster (entity key) left untouched; 0 = not locked yet
+	maskDodge     uint32 // skill_id written over masked casts (a no-VFX Dodge id)
+	casterFilter  uint64 // engine-level caster filter: only this caster is processed; 0 = all
+	running       bool
 
 	stop       chan struct{}
 	ports      *portTracker
@@ -350,26 +349,18 @@ func (e *Engine) SetCasterFilter(id uint64) {
 	e.mu.Unlock()
 }
 
-const casterAutoThreshold = 5 // an ACT caster must EXCEED this (6+) to be auto-locked
-
-// bumpCasterAuto tallies one ACT for caster. Auto-detect is ALWAYS on (no toggle):
-// when a caster exceeds the threshold it becomes the active caster filter —
-// replacing any current value — and the tally resets for the next detection
-// window. Returns the caster id only when the active filter actually CHANGES, so
-// the UI updates without spamming on every re-lock to the same caster; else 0.
+// bumpCasterAuto locks the caster filter onto the caster of any ACT cast of one of
+// YOUR configured skills (callers already gate on that). Auto-detect is always on
+// and immediate: the first/changed caster becomes the active filter right away — no
+// counting threshold. Returns the caster id only when the filter actually CHANGES,
+// so the UI updates without spamming on every cast by the same caster; else 0.
+// (A same-class party member casting your exact skill can still flip it — deferred.)
 func (e *Engine) bumpCasterAuto(caster uint64) uint64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.casterAutoCount == nil {
-		e.casterAutoCount = map[uint64]int{}
-	}
-	e.casterAutoCount[caster]++
-	if e.casterAutoCount[caster] > casterAutoThreshold {
-		e.casterAutoCount = map[uint64]int{}
-		if caster != e.casterFilter {
-			e.casterFilter = caster
-			return caster
-		}
+	if caster != e.casterFilter {
+		e.casterFilter = caster
+		return caster
 	}
 	return 0
 }
@@ -905,12 +896,16 @@ func (e *Engine) editCompressedCasts(
 			continue // only 0x02 ACT casts carry the position+speed block
 		}
 		caster := extractEntityKey(clean, hh.offset)
-		// Caster auto-detect (always on): count compressed ACTs too, before any
-		// filter, so detection works under party load where most casts are LZ4.
+		// Caster auto-detect: count ONLY casts of YOUR configured skills (the ones
+		// that become an ACT edit) — not every catalog skill — so a party member's
+		// casts can't thrash the lock onto the wrong caster. Runs before the filters
+		// so it still sees every caster of your own skill.
 		if caster != 0 {
-			if locked := e.bumpCasterAuto(caster); locked != 0 {
-				e.emitLog(fmt.Sprintf("Auto-detected caster %d", locked))
-				e.fire("capture:caster-auto", locked)
+			if _, conf := lookup[hh.id]; conf {
+				if locked := e.bumpCasterAuto(caster); locked != 0 {
+					e.emitLog(fmt.Sprintf("Auto-detected caster %d", locked))
+					e.fire("capture:caster-auto", locked)
+				}
 			}
 		}
 		cfg, isConfigured := lookup[hh.id]
@@ -1190,14 +1185,18 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		}
 		caster := extractEntityKey(payload, hh.offset)
 
-		// Caster auto-detect (always on): count every real ACT cast per caster
-		// (before any filter drops them). When one exceeds the threshold it becomes
-		// the active filter — replacing any current value — and the UI is notified.
-		// Runs before the filters below so it sees all casters.
+		// Caster auto-detect: count ONLY casts of YOUR configured skills (the ones
+		// that become an ACT edit) — not every catalog skill — so a party member's
+		// casts can't thrash the lock onto the wrong caster. When one caster exceeds
+		// the threshold it becomes the active filter (replacing any current value)
+		// and the UI is notified. Runs before the filters below so it still sees
+		// every caster of your own skill.
 		if is02 && caster != 0 {
-			if locked := e.bumpCasterAuto(caster); locked != 0 {
-				e.emitLog(fmt.Sprintf("Auto-detected caster %d", locked))
-				e.fire("capture:caster-auto", locked)
+			if _, conf := lookup[hh.id]; conf {
+				if locked := e.bumpCasterAuto(caster); locked != 0 {
+					e.emitLog(fmt.Sprintf("Auto-detected caster %d", locked))
+					e.fire("capture:caster-auto", locked)
+				}
 			}
 		}
 
