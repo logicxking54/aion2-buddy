@@ -14,7 +14,7 @@ export interface AppConfig {
   language: 'th' | 'en'
   character: string
   defaultSpeed: number
-  casterRecord: number // manual caster-filter entity key (0 = all casters)
+  casterRecord: number // auto-detected caster-filter entity key — RUNTIME ONLY, never persisted (changes every session)
   panelHeight: number
   overlay: boolean // overlay mode: window pinned above the game; UI adapts when on
   devMode: boolean // show developer-only menus (e.g. Packet Inspector)
@@ -66,7 +66,7 @@ async function doLoad(): Promise<void> {
       if (raw) {
         const data = JSON.parse(raw)
         if (data && typeof data === 'object') Object.assign(config, data)
-        if (typeof config.casterRecord !== 'number') config.casterRecord = 0
+        config.casterRecord = 0 // never restore a persisted caster; it's per-session
       }
     } catch {
       // ignore malformed config
@@ -84,6 +84,8 @@ export function saveConfig(): void {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     const a = appBackend()
-    if (a) a.SaveConfig(JSON.stringify(config)).catch(() => {})
+    // casterRecord is auto-detected per session — strip it so it's never persisted.
+    const { casterRecord: _drop, ...persist } = config
+    if (a) a.SaveConfig(JSON.stringify(persist)).catch(() => {})
   }, 300)
 }

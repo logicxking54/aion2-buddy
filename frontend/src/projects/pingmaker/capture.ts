@@ -30,7 +30,6 @@ interface CaptureBackend {
   SetSessionRecord(on: boolean): Promise<string>
   SetCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void>
   SetCasterFilter(id: number): Promise<void>
-  SetCasterAutoDetect(on: boolean): Promise<void>
   IsCapturing(): Promise<boolean>
 }
 
@@ -99,13 +98,6 @@ export async function setCasterMask(on: boolean, keepCaster: number, dodgeID: nu
 export async function setCasterFilter(id: number): Promise<void> {
   const b = backend()
   if (b) await b.SetCasterFilter(id)
-}
-
-// setCasterAutoDetect starts/stops caster auto-detection. The backend emits
-// 'capture:caster-auto' with the detected caster id when one passes the threshold.
-export async function setCasterAutoDetect(on: boolean): Promise<void> {
-  const b = backend()
-  if (b) await b.SetCasterAutoDetect(on)
 }
 
 export async function isCapturing(): Promise<boolean> {

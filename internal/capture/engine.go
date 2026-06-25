@@ -4,6 +4,7 @@ package capture
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -198,8 +199,7 @@ type Engine struct {
 	maskKeep      uint64            // your caster (entity key) left untouched; 0 = not locked yet
 	maskDodge     uint32            // skill_id written over masked casts (a no-VFX Dodge id)
 	casterFilter  uint64            // engine-level caster filter: only this caster is processed; 0 = all
-	casterAuto      bool           // caster auto-detect mode: count ACTs per caster, lock the dominant one
-	casterAutoCount map[uint64]int // per-caster ACT tally while auto-detecting
+	casterAutoCount map[uint64]int // per-caster ACT tally for always-on auto-detect
 	running       bool
 
 	stop       chan struct{}
@@ -445,41 +445,26 @@ func (e *Engine) SetCasterFilter(id uint64) {
 	e.mu.Unlock()
 }
 
-const casterAutoThreshold = 10 // an ACT caster must EXCEED this to be auto-locked
+const casterAutoThreshold = 5 // an ACT caster must EXCEED this (6+) to be auto-locked
 
-// SetCasterAutoDetect starts/stops caster auto-detection. While on, the engine
-// tallies every real ACT cast per caster and, when one exceeds the threshold,
-// emits "capture:caster-auto" with that caster id (and auto-stops). The UI drops
-// it into the caster filter. Starting always resets the tally.
-func (e *Engine) SetCasterAutoDetect(on bool) {
-	e.mu.Lock()
-	e.casterAuto = on
-	e.casterAutoCount = map[uint64]int{}
-	e.mu.Unlock()
-	if on {
-		e.emitLog("Auto-detecting caster — cast a skill until one caster passes 10 ACTs…")
-	} else {
-		e.emitLog("Caster auto-detect stopped")
-	}
-}
-
-// bumpCasterAuto records one ACT for caster and returns the caster id once it
-// exceeds the threshold (auto-stopping detection), else 0. Safe for the packet
-// goroutine: guarded by e.mu and re-checks the flag under the lock.
+// bumpCasterAuto tallies one ACT for caster. Auto-detect is ALWAYS on (no toggle):
+// when a caster exceeds the threshold it becomes the active caster filter —
+// replacing any current value — and the tally resets for the next detection
+// window. Returns the caster id only when the active filter actually CHANGES, so
+// the UI updates without spamming on every re-lock to the same caster; else 0.
 func (e *Engine) bumpCasterAuto(caster uint64) uint64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if !e.casterAuto {
-		return 0
-	}
 	if e.casterAutoCount == nil {
 		e.casterAutoCount = map[uint64]int{}
 	}
 	e.casterAutoCount[caster]++
 	if e.casterAutoCount[caster] > casterAutoThreshold {
-		e.casterAuto = false
 		e.casterAutoCount = map[uint64]int{}
-		return caster
+		if caster != e.casterFilter {
+			e.casterFilter = caster
+			return caster
+		}
 	}
 	return 0
 }
@@ -570,6 +555,17 @@ func (e *Engine) recordPacket(ch chan string, dir string, raw, payload []byte) {
 	}
 	line := fmt.Sprintf(`{"time":"%s","dir":"%s","len":%d,"seq":%s,"hex":"%s"}`,
 		time.Now().Format("15:04:05.000"), dir, len(payload), seqStr, hex.EncodeToString(payload))
+	select {
+	case ch <- line:
+	default:
+	}
+}
+
+// recordCast appends one per-cast annotation line (the edit decision) to the
+// session recorder, interleaved with the raw-packet lines so each cast can be
+// correlated to the packet it came from. fields is the inner JSON of "cast".
+func (e *Engine) recordCast(ch chan string, fields string) {
+	line := fmt.Sprintf(`{"time":"%s","cast":{%s}}`, time.Now().Format("15:04:05.000"), fields)
 	select {
 	case ch <- line:
 	default:
@@ -994,6 +990,144 @@ func (e *Engine) runHandle(h handle) {
 	}
 }
 
+// lz4DecompressEdit gates the compressed-cast editor (party-load LZ4 packets).
+// Length-preserving and safe, so it defaults on; flip to false to fall back to
+// the legacy wire-literal heuristic if a problem ever shows up in the field.
+var lz4DecompressEdit = true
+
+// editCompressedCasts handles party-load LZ4-compressed inbound packets. It
+// decompresses the block (with literal provenance), edits each configured cast's
+// attack-speed in the CLEAN stream — where the strict id-anchored parser is
+// reliable — then writes the new speed bytes back into the exact block literals.
+// The edit is length-preserving (same bytes, same count), so the TCP segment is
+// untouched and no sequence rewriting is needed. Casts whose speed is encoded as
+// an LZ4 back-reference (not a literal) can't be reached this way and are logged.
+//
+// Returns handled=true when the payload was an LZ4 frame (the caller should then
+// skip the legacy plaintext path), and edited=true if any speed byte was changed.
+func (e *Engine) editCompressedCasts(
+	raw, payload []byte, payloadOffset int,
+	scanIDs map[uint32]struct{}, scanFB map[byte]struct{},
+	lookup map[uint32]skillCfg, idToName map[uint32]string,
+	casterFilter uint64, filtering, autoMode bool, autoBase, autoPerMs float64,
+) (handled, edited bool) {
+	blockStart, origLen, ok := parseLZ4Frame(payload)
+	if !ok {
+		return false, false
+	}
+	handled = true
+	clean, litSrc, dok := lz4DecompressTrace(payload[blockStart:], origLen)
+	if !dok {
+		return handled, false // malformed → leave the packet untouched
+	}
+
+	hits := findAllSkillIDs(clean, scanIDs, scanFB, 0)
+	for i := range hits {
+		hh := hits[i]
+		if hh.offset+6 > len(clean) {
+			continue
+		}
+		if !(hh.prefixOK && clean[hh.offset+5] == 0x02) {
+			continue // only 0x02 ACT casts carry the position+speed block
+		}
+		caster := extractEntityKey(clean, hh.offset)
+		// Caster auto-detect (always on): count compressed ACTs too, before any
+		// filter, so detection works under party load where most casts are LZ4.
+		if caster != 0 {
+			if locked := e.bumpCasterAuto(caster); locked != 0 {
+				e.emitLog(fmt.Sprintf("Auto-detected caster %d", locked))
+				e.fire("capture:caster-auto", locked)
+			}
+		}
+		cfg, isConfigured := lookup[hh.id]
+		if !isConfigured {
+			continue
+		}
+		if filtering && (caster == 0 || !e.tracker.isMine(caster)) {
+			continue
+		}
+		if casterFilter != 0 && caster != 0 && caster != casterFilter {
+			continue
+		}
+		name := idToName[hh.id]
+		if name == "" {
+			name = cfg.name
+		}
+		if skipSpeedEditForStability(name, hh.id) {
+			continue
+		}
+		spdOff, spdLen, spdVal, isFloat, spdFound := findAttackSpeedOffset(clean, hh.offset)
+		if !spdFound || spdVal < 10000 {
+			continue
+		}
+
+		// Map every speed byte back to a block literal; bail if any is match-copied.
+		blkPos := make([]int, spdLen)
+		reachable := true
+		for k := 0; k < spdLen; k++ {
+			if spdOff+k >= len(litSrc) || litSrc[spdOff+k] < 0 {
+				reachable = false
+				break
+			}
+			blkPos[k] = litSrc[spdOff+k]
+		}
+		if !reachable {
+			e.emitLog(fmt.Sprintf("ACT %s %d (lz4 match — unreachable) [Caster: %d, Id: %d]", name, spdVal, caster, hh.id))
+			continue
+		}
+
+		// Compute the replacement bytes (same length as the original field).
+		var newBytes []byte
+		logSuffix := ""
+		if cfg.brk {
+			if isFloat {
+				var b [4]byte
+				binary.LittleEndian.PutUint32(b[:], math.Float32bits(float32(9999999.0/10000.0)))
+				newBytes = b[:]
+			} else {
+				newBytes = bytes.Repeat([]byte{0xFF}, spdLen)
+			}
+			logSuffix = "break"
+		} else {
+			added := uint64(cfg.speedPct) * 100
+			if autoMode && !cfg.override {
+				a := autoBase + autoPerMs*e.pingEWMA
+				if a < 0 {
+					a = 0
+				}
+				added = uint64(a + 0.5)
+			}
+			target := spdVal + added
+			if isFloat {
+				if target > 9999999 {
+					target = 9999999
+				}
+				var b [4]byte
+				binary.LittleEndian.PutUint32(b[:], math.Float32bits(float32(float64(target)/10000.0)))
+				newBytes = b[:]
+			} else {
+				maxVal := (uint64(1) << (7 * uint(spdLen))) - 1
+				if target > maxVal {
+					target = maxVal
+				}
+				newBytes = encodeVarintFixed(target, spdLen)
+			}
+			logSuffix = fmt.Sprintf("+%d", added)
+		}
+		if len(newBytes) != spdLen {
+			continue // can't keep the field length — skip rather than desync
+		}
+
+		for k := 0; k < spdLen; k++ {
+			raw[payloadOffset+blockStart+blkPos[k]] = newBytes[k]
+		}
+		edited = true
+		e.countModify()
+		e.emitLog(fmt.Sprintf("ACT %s %d %s [Caster: %d, Id: %d] (lz4)", name, spdVal, logSuffix, caster, hh.id))
+	}
+	return handled, edited
+}
+
 func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	modified := false
 	defer func() {
@@ -1033,7 +1167,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	maskKeep := e.maskKeep
 	maskDodge := e.maskDodge
 	casterFilter := e.casterFilter
-	casterAuto := e.casterAuto
 	sessionCh := e.sessionCh
 	e.mu.Unlock()
 
@@ -1129,12 +1262,27 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		e.emitInspect(payload, "inbound", -1)
 	}
 
+	// Party-load packets are LZ4-compressed: the legacy plaintext scan below only
+	// catches casts whose speed happens to land in an LZ4 literal. Handle the
+	// compressed frame properly — decompress, edit speed in the clean stream, and
+	// patch the block literals in place (length-preserving). Skip the mask path
+	// (it edits other casters' ids and still uses the legacy route).
+	filtering := e.tracker.isConfigured()
+	if lz4DecompressEdit && !maskOn {
+		if handled, ed := e.editCompressedCasts(raw, payload, payloadOffset,
+			scanIDs, scanFB, lookup, idToName, casterFilter, filtering, autoMode, autoBase, autoPerMs); handled {
+			if ed {
+				modified = true
+			}
+			return
+		}
+	}
+
 	hits := findAllSkillIDs(payload, scanIDs, scanFB, scanStartDefault)
 	if len(hits) == 0 {
 		return
 	}
 
-	filtering := e.tracker.isConfigured()
 	pinged := false // ping is measured once per packet, on our own 0x02 cast
 
 	// Process EVERY cast in the packet — rapid combos coalesce several skill
@@ -1172,11 +1320,11 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		}
 		caster := extractEntityKey(payload, hh.offset)
 
-		// Caster auto-detect: while active, count every real ACT cast per caster
-		// (before any filter drops them). The first caster to exceed the threshold
-		// is reported to the UI, which drops it into the caster filter. Runs before
-		// the filters below so it sees all casters.
-		if casterAuto && is02 && caster != 0 {
+		// Caster auto-detect (always on): count every real ACT cast per caster
+		// (before any filter drops them). When one exceeds the threshold it becomes
+		// the active filter — replacing any current value — and the UI is notified.
+		// Runs before the filters below so it sees all casters.
+		if is02 && caster != 0 {
 			if locked := e.bumpCasterAuto(caster); locked != 0 {
 				e.emitLog(fmt.Sprintf("Auto-detected caster %d", locked))
 				e.fire("capture:caster-auto", locked)
@@ -1216,6 +1364,9 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		// speed edit on some of your own spam casts, so a 0 (unknown) caster is given
 		// the benefit of the doubt and processed.
 		if casterFilter != 0 && caster != 0 && caster != casterFilter {
+			if sessionCh != nil && is02 {
+				e.recordCast(sessionCh, fmt.Sprintf(`"id":%d,"caster":%d,"result":"dropped-caster-filter"`, hh.id, caster))
+			}
 			continue
 		}
 
@@ -1281,6 +1432,21 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		var isFloat, spdFound bool
 		if isConfigured {
 			spdOff, spdLen, spdVal, isFloat, spdFound = findAttackSpeedOffset(payload, hh.offset)
+		}
+
+		// Session recorder: annotate each configured ACT with the edit decision so
+		// offline analysis can tell which casts actually edited vs were missed at
+		// runtime (the raw-packet line only shows pre-edit bytes). willEdit mirrors
+		// the edit condition in the block below; spdRel is the speed's offset from
+		// the skill id (-1 if not found).
+		if sessionCh != nil && isConfigured && is02 {
+			spdRel := -1
+			if spdFound {
+				spdRel = spdOff - hh.offset
+			}
+			e.recordCast(sessionCh, fmt.Sprintf(
+				`"id":%d,"caster":%d,"spdFound":%t,"spdRel":%d,"spdVal":%d,"float":%t,"willEdit":%t,"result":"processed"`,
+				hh.id, caster, spdFound, spdRel, spdVal, isFloat, spdFound && spdVal >= 10000))
 		}
 
 		// Combo-chain test: rewrite this cast's trailing record

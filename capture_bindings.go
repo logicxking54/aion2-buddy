@@ -116,13 +116,6 @@ func (c *Capture) SetCasterFilter(id uint64) {
 	c.engine.SetCasterFilter(id)
 }
 
-// SetCasterAutoDetect starts/stops caster auto-detection. While on, the engine
-// counts ACT casts per caster and emits "capture:caster-auto" with the first
-// caster to pass the threshold (then auto-stops).
-func (c *Capture) SetCasterAutoDetect(on bool) {
-	c.engine.SetCasterAutoDetect(on)
-}
-
 // IsCapturing reports whether capture is currently running.
 func (c *Capture) IsCapturing() bool {
 	return c.engine.IsRunning()

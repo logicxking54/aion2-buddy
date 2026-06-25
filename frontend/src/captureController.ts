@@ -3,14 +3,13 @@
 // it keeps the engine in sync with the shared `config` store, so any menu can
 // edit settings and the running capture updates automatically.
 import { reactive, ref, watch } from 'vue'
-import { config, loadConfig, saveConfig } from './config'
+import { config, loadConfig } from './config'
 import { i18n } from './i18n'
 import { skills, relatedSkillIds } from './projects/pingmaker/skills'
 import {
   captureAvailable,
   EventsOn,
   isCapturing,
-  setCasterAutoDetect,
   setCasterFilter,
   setCatalog,
   startCapture,
@@ -35,18 +34,6 @@ export const errorMsg = ref('')
 export const gameDetected = ref(false)
 export const logs = reactive<LogEntry[]>([])
 
-// Caster auto-detect: true while the engine is counting ACTs to find your caster.
-export const casterAutoDetecting = ref(false)
-export async function startCasterAutoDetect() {
-  if (!captureAvailable()) return
-  if (!running.value) await start()
-  await setCasterAutoDetect(true).catch(() => {})
-  casterAutoDetecting.value = true
-}
-export async function stopCasterAutoDetect() {
-  await setCasterAutoDetect(false).catch(() => {})
-  casterAutoDetecting.value = false
-}
 
 // Recently used skills (newest first), for the overlay HUD. Each cast is a
 // numeric skill id; the UI maps it to a Skill for image/name.
@@ -161,13 +148,12 @@ export async function initCapture() {
   EventsOn('capture:ping', (p: number) => {
     ping.value = p ?? 0
   })
-  // Caster auto-detect found your caster: drop it into the filter field (the
-  // casterRecord watcher pushes it to the engine + persists), then stop.
+  // Caster auto-detect (always on in the engine) locked a new caster: reflect it
+  // in the runtime display field only. The engine already set its own filter, and
+  // the caster id changes every session so it's intentionally not persisted.
   EventsOn('capture:caster-auto', (caster: number) => {
     if (!Number.isFinite(caster) || caster <= 0) return
     config.casterRecord = caster
-    saveConfig()
-    casterAutoDetecting.value = false
     log('Auto-detected caster ' + caster, 'info')
   })
   EventsOn('capture:cast', (c: { id: number }) => {

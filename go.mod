@@ -3,6 +3,7 @@ module aion2tmp
 go 1.23.1
 
 require (
+	github.com/pierrec/lz4/v4 v4.1.27
 	github.com/wailsapp/wails/v2 v2.11.0
 	golang.org/x/sys v0.32.0
 )

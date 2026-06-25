@@ -6,8 +6,6 @@ export function IsCapturing():Promise<boolean>;
 
 export function SetAuto(arg1:boolean,arg2:number,arg3:number):Promise<void>;
 
-export function SetCasterAutoDetect(arg1:boolean):Promise<void>;
-
 export function SetCasterFilter(arg1:number):Promise<void>;
 
 export function SetCasterMask(arg1:boolean,arg2:number,arg3:number):Promise<void>;

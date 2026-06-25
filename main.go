@@ -16,7 +16,6 @@ func main() {
 	// Create an instance of the app structure
 	app := NewApp()
 	captureBinding := NewCapture()
-	memReadBinding := NewMemRead()
 	modBinding := NewMod()
 
 	// Create application with options
@@ -33,13 +32,11 @@ func main() {
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
 			captureBinding.setContext(ctx)
-			memReadBinding.setContext(ctx)
 			modBinding.setContext(ctx)
 		},
 		Bind: []interface{}{
 			app,
 			captureBinding,
-			memReadBinding,
 			modBinding,
 		},
 	})

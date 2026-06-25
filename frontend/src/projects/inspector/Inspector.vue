@@ -1,30 +1,12 @@
 <script lang="ts" setup>
 import { onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { EventsOn, setInspect, setComboTest, setDecode, setSessionRecord } from '../pingmaker/capture'
+import { EventsOn, setInspect, setSessionRecord } from '../pingmaker/capture'
 import { running, start, stop, log } from '../../captureController'
 
 const { t } = useI18n()
 
 const enabled = ref(false)
-const paused = ref(false)
-
-// Experimental: redirect a chain skill's "next form" id so the client's combo
-// follow-up button changes (Burst → Ice Chain → Pyroclasm). Persists in the
-// engine, so it keeps working after leaving this page; toggle off to stop.
-const comboOn = ref(false)
-function toggleCombo() {
-  comboOn.value = !comboOn.value
-  setComboTest(comboOn.value).catch(() => {})
-}
-
-// Print every decoded field of each cast (skill, tick, caster, position, speed,
-// trailing record) to the log.
-const decodeOn = ref(false)
-function toggleDecode() {
-  decodeOn.value = !decodeOn.value
-  setDecode(decodeOn.value).catch(() => {})
-}
 
 // Record EVERY raw packet (in + out, all sizes, original pre-edit bytes) of the
 // whole session to a JSONL file on disk — uncapped, for offline analysis of why
@@ -132,7 +114,6 @@ function spaced(hex: string) {
 const unsub = EventsOn(
   'inspector:packet',
   (p: { label: string; len: number; offset: number; opcodes: string[]; hex: string }) => {
-    if (paused.value) return
     entries.unshift({
       time: stamp(),
       label: p.label,
@@ -174,33 +155,12 @@ onUnmounted(() => {
 
       <button
         type="button"
-        @click="toggleCombo"
-        title="Test: redirect chain next-id Burst → Ice Chain → Pyroclasm (changes the combo follow-up button)"
-        class="rounded-md px-3 py-1 text-xs font-semibold transition"
-        :class="comboOn ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/30' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
-      >{{ comboOn ? '● Combo Test ON' : 'Combo Test' }}</button>
-
-      <button
-        type="button"
-        @click="toggleDecode"
-        title="Print every decoded field of each cast (skill, tick, caster, position, speed, trailing record) to the log"
-        class="rounded-md px-3 py-1 text-xs font-semibold transition"
-        :class="decodeOn ? 'bg-sky-500/20 text-sky-300 ring-1 ring-sky-400/30' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
-      >{{ decodeOn ? '● Decode ON' : 'Decode' }}</button>
-
-      <button
-        type="button"
         @click="toggleRecord"
         title="Record every raw packet (in + out) of the whole session to a JSONL file for offline analysis — uncapped, written straight to disk"
         class="rounded-md px-3 py-1 text-xs font-semibold transition"
         :class="recordOn ? 'bg-red-500/20 text-red-300 ring-1 ring-red-400/30' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
       >{{ recordOn ? '● Recording' : 'Record session' }}</button>
 
-      <button
-        type="button"
-        @click="paused = !paused"
-        class="rounded-md bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300 transition hover:bg-white/10"
-      >{{ paused ? t('insp.resume') : t('insp.pause') }}</button>
       <button
         type="button"
         @click="clearList"

@@ -22,7 +22,6 @@ export default {
     },
     mod: { label: 'Mod', description: 'Toggle individual game mods on or off.' },
     inspector: { label: 'Packet Inspector', description: 'Dump captured game messages (hex + opcodes) to explore the data.' },
-    memread: { label: 'Memory Probe', description: 'Read-only memory reader: follow a Cheat Engine pointer path to hunt the cooldown value.' },
     settings: { label: 'Settings', description: 'Configure app preferences.' },
   },
   mod: {
@@ -66,10 +65,6 @@ export default {
     detecting: 'detecting…',
     active: 'Active skills',
     defaultSpeed: 'Default combat speed bonus %',
-    casterRecord: 'Caster',
-    casterAuto: 'Auto-detect',
-    casterAutoStop: 'Detecting…',
-    casterAutoHint: 'Cast a skill repeatedly — once one caster passes 10 ACTs it fills the Caster filter. Press again to stop.',
     combatSpeed: 'Combat speed bonus %',
     break: 'Break',
     breakHint: 'Bypass the speed cap — use on no-cooldown skills only',

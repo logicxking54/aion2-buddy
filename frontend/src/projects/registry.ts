@@ -1,6 +1,5 @@
 import type { Component } from 'vue'
 import Inspector from './inspector/Inspector.vue'
-import MemProbe from './memread/MemProbe.vue'
 import Mod from './mod/Mod.vue'
 import PingMaker from './pingmaker/PingMaker.vue'
 import Settings from './settings/Settings.vue'
@@ -21,6 +20,5 @@ export const projects: ProjectMenu[] = [
   { id: 'pingmaker', icon: '📍', component: PingMaker },
   { id: 'mod', icon: '🧩', component: Mod },
   { id: 'inspector', icon: '🔍', component: Inspector, dev: true },
-  { id: 'memread', icon: '🧠', component: MemProbe, dev: true },
   { id: 'settings', icon: '⚙️', component: Settings, pinBottom: true },
 ]

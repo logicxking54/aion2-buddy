@@ -318,6 +318,120 @@ func hasLegacyChargeSpeedTrailer(data []byte, post int) bool {
 	return bytes.Equal(data[post+1:post+8], []byte{0x0c, 0x1b, 0x38, 0x00, 0x00, 0x23, 0x00})
 }
 
+// ── LZ4 block framing (party-load compression) ────────────────
+//
+// Under dense combat the server batches messages and LZ4-block-compresses them.
+// The cast data is identical to solo — just packed. Wire framing (confirmed
+// against the reference DPS meter's decompressPacket and by round-tripping real
+// captures):
+//
+//	[varint pktLen][optional flag 0xf0–0xfe][ff ff][uint32le origLen][LZ4 block]
+//
+// parseLZ4Frame locates the LZ4 block and the decompressed length. Returns
+// (blockStart, origLen, ok). ok=false means the payload isn't an LZ4 frame.
+func parseLZ4Frame(payload []byte) (blockStart, origLen int, ok bool) {
+	_, l := parseVarint(payload, 0)
+	if l <= 0 || l >= len(payload) {
+		return 0, 0, false
+	}
+	p := l
+	// optional "extra" flag byte (0xf0–0xfe) before the ff ff marker
+	if payload[p] >= 0xf0 && payload[p] < 0xff {
+		p++
+	}
+	if p+2 > len(payload) || payload[p] != 0xff || payload[p+1] != 0xff {
+		return 0, 0, false
+	}
+	p += 2
+	if p+4 > len(payload) {
+		return 0, 0, false
+	}
+	origLen = int(binary.LittleEndian.Uint32(payload[p : p+4]))
+	p += 4
+	if origLen <= 0 || origLen > maxReassemblerBuffer || p >= len(payload) {
+		return 0, 0, false
+	}
+	return p, origLen, true
+}
+
+// lz4DecompressTrace decompresses a raw LZ4 block AND records provenance: for
+// every output byte, litSrc[i] is the block offset of the literal that produced
+// it, or -1 if it was copied from a back-reference (match). That mapping lets a
+// caller edit a decompressed field by writing the same bytes back into the exact
+// block literals — a length-preserving in-place edit that survives the client's
+// own decompression. Fields whose bytes are match-copied (litSrc < 0) can't be
+// reached this way without changing the block length. Returns ok=false if the
+// block is malformed or doesn't expand to exactly outLen.
+func lz4DecompressTrace(src []byte, outLen int) (out []byte, litSrc []int, ok bool) {
+	out = make([]byte, 0, outLen)
+	litSrc = make([]int, 0, outLen)
+	i := 0
+	for i < len(src) {
+		token := src[i]
+		i++
+		litLen := int(token >> 4)
+		if litLen == 15 {
+			for {
+				if i >= len(src) {
+					return out, litSrc, false
+				}
+				b := src[i]
+				i++
+				litLen += int(b)
+				if b != 255 {
+					break
+				}
+			}
+		}
+		if i+litLen > len(src) {
+			return out, litSrc, false
+		}
+		for k := 0; k < litLen; k++ {
+			out = append(out, src[i+k])
+			litSrc = append(litSrc, i+k)
+		}
+		i += litLen
+		if i >= len(src) {
+			break // last sequence is literals-only
+		}
+		if i+2 > len(src) {
+			break
+		}
+		offset := int(binary.LittleEndian.Uint16(src[i : i+2]))
+		i += 2
+		if offset == 0 {
+			return out, litSrc, false
+		}
+		matchLen := int(token & 0x0F)
+		if matchLen == 15 {
+			for {
+				if i >= len(src) {
+					return out, litSrc, false
+				}
+				b := src[i]
+				i++
+				matchLen += int(b)
+				if b != 255 {
+					break
+				}
+			}
+		}
+		matchLen += 4
+		start := len(out) - offset
+		if start < 0 {
+			return out, litSrc, false
+		}
+		for k := 0; k < matchLen; k++ {
+			out = append(out, out[start+k])
+			litSrc = append(litSrc, -1) // match-copied → not directly editable
+		}
+	}
+	if len(out) != outLen {
+		return out, litSrc, false
+	}
+	return out, litSrc, true
+}
+
 // extractEntityKey reads the entity key from the prefix bytes before a skill ID
 // (3 bytes back, then 2). Returns 0 if none found.
 func extractEntityKey(data []byte, skillOffset int) uint64 {

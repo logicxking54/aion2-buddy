@@ -22,7 +22,6 @@ export default {
     },
     mod: { label: 'ม็อด', description: 'เปิด/ปิดม็อดของเกมแต่ละตัว' },
     inspector: { label: 'ตรวจสอบแพ็กเก็ต', description: 'ดูข้อมูลในแพ็กเก็ตเกม (hex + opcode) เพื่อสำรวจข้อมูล' },
-    memread: { label: 'อ่านหน่วยความจำ', description: 'อ่านหน่วยความจำแบบอ่านอย่างเดียว: ตาม pointer path จาก Cheat Engine เพื่อหาค่าคูลดาวน์' },
     settings: { label: 'ตั้งค่า', description: 'ปรับแต่งการตั้งค่าแอป' },
   },
   mod: {
@@ -66,10 +65,6 @@ export default {
     detecting: 'กำลังตรวจจับ…',
     active: 'สกิลที่ใช้งาน',
     defaultSpeed: 'โบนัสความเร็วคอมแบตเริ่มต้น %',
-    casterRecord: 'Caster',
-    casterAuto: 'หาอัตโนมัติ',
-    casterAutoStop: 'กำลังหา…',
-    casterAutoHint: 'ร่ายสกิลซ้ำๆ พอ caster ใดเกิน 10 ACT จะเติมลงช่อง Caster ให้อัตโนมัติ กดอีกครั้งเพื่อหยุด',
     combatSpeed: 'โบนัสความเร็วคอมแบต %',
     break: 'เบรก',
     breakHint: 'ข้ามลิมิตความเร็ว — ใช้กับสกิลที่ไม่มีคูลดาวน์เท่านั้น',

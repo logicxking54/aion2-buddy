@@ -10,10 +10,6 @@ export function SetAuto(arg1, arg2, arg3) {
   return window['go']['main']['Capture']['SetAuto'](arg1, arg2, arg3);
 }
 
-export function SetCasterAutoDetect(arg1) {
-  return window['go']['main']['Capture']['SetCasterAutoDetect'](arg1);
-}
-
 export function SetCasterFilter(arg1) {
   return window['go']['main']['Capture']['SetCasterFilter'](arg1);
 }

@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { classes, skills, skillColor, type Skill, type SkillClass } from './skills'
 import errorImage from '../../assets/images/skill-error.svg'
 import { config, loadConfig, saveConfig } from '../../config'
-import { casterAutoDetecting, startCasterAutoDetect, stopCasterAutoDetect } from '../../captureController'
 
 const { t } = useI18n()
 
@@ -216,29 +215,6 @@ onMounted(async () => {
           class="ml-auto w-20 rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-right text-sm text-white outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
         />
         <span class="text-[11px] text-slate-500">%</span>
-      </div>
-
-      <div class="mt-2 flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-ink-800 px-3 py-2 text-xs font-semibold text-slate-300">
-        <label class="flex items-center gap-2">
-          <span>{{ t('ping.casterRecord') }}</span>
-          <input
-            v-model.number="config.casterRecord"
-            @change="saveConfig"
-            type="number"
-            min="0"
-            placeholder="-"
-            class="w-28 rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-right text-sm text-white outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
-          />
-        </label>
-        <button
-          type="button"
-          @click="casterAutoDetecting ? stopCasterAutoDetect() : startCasterAutoDetect()"
-          :title="t('ping.casterAutoHint')"
-          class="shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold transition"
-          :class="casterAutoDetecting
-            ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/30'
-            : 'bg-accent/15 text-accent hover:bg-accent/25'"
-        >{{ casterAutoDetecting ? '● ' + t('ping.casterAutoStop') : t('ping.casterAuto') }}</button>
       </div>
 
       <!-- Search added skills -->

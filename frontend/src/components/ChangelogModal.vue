@@ -19,6 +19,14 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.1.0',
+    changes: [
+      { en: 'Ping Maker now edits combat speed inside LZ4-compressed party packets — boosts apply to ~100% of party casts (no more occasional slow casts)', th: 'Ping Maker แก้ความเร็วในแพ็กเก็ตปาร์ตี้ที่ถูกบีบอัด (LZ4) ได้แล้ว — บูสต์ติดเกือบ 100% ของการร่ายในปาร์ตี้ (ไม่มีร่ายช้าเป็นบางครั้งอีก)' },
+      { en: 'Fixed a reconnect/disconnect issue during play', th: 'แก้ปัญหา reconnect/หลุดการเชื่อมต่อระหว่างเล่น' },
+      { en: 'Added image icons for all skills', th: 'เพิ่มไอคอนรูปภาพให้สกิลทั้งหมด' },
+    ],
+  },
+  {
     version: '1.0.7',
     changes: [
       { en: 'Added caster data recording and caster-prioritized Ping Maker logs', th: 'เพิ่มการบันทึกข้อมูล Caster และกรองบันทึก Ping Maker ตาม Caster' },
