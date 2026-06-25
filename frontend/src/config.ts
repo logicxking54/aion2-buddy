@@ -16,7 +16,6 @@ export interface AppConfig {
   defaultSpeed: number
   casterRecord: number // auto-detected caster-filter entity key — RUNTIME ONLY, never persisted (changes every session)
   panelHeight: number
-  overlay: boolean // overlay mode: window pinned above the game; UI adapts when on
   devMode: boolean // show developer-only menus (e.g. Packet Inspector)
   casterMask: boolean // FPS mask: rewrite other players' casts to Dodge (dev-only)
   rows: SavedRow[]
@@ -35,7 +34,6 @@ export const config = reactive<AppConfig>({
   defaultSpeed: 250,
   casterRecord: 0,
   panelHeight: 300,
-  overlay: false,
   devMode: false,
   casterMask: false,
   rows: [],

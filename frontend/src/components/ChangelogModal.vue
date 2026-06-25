@@ -19,6 +19,13 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.1.1',
+    changes: [
+      { en: 'Removed the Overlay (always-on-top HUD) mode', th: 'เอาโหมด Overlay (ปักหมุดหน้าต่างทับเกม) ออก' },
+      { en: 'Cleaner Ping Maker log output', th: 'ปรับ log ของ Ping Maker ให้สะอาดขึ้น' },
+    ],
+  },
+  {
     version: '1.1.0',
     changes: [
       { en: 'Ping Maker now edits combat speed inside LZ4-compressed party packets — boosts apply to ~100% of party casts (no more occasional slow casts)', th: 'Ping Maker แก้ความเร็วในแพ็กเก็ตปาร์ตี้ที่ถูกบีบอัด (LZ4) ได้แล้ว — บูสต์ติดเกือบ 100% ของการร่ายในปาร์ตี้ (ไม่มีร่ายช้าเป็นบางครั้งอีก)' },

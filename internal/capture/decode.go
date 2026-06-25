@@ -8,7 +8,7 @@ package capture
 // length-prefixed messages (handling the extra-flag byte and FF FF LZ4 bundles),
 // dispatches by 2-byte opcode, and decodes the combat-relevant ones (damage,
 // DoT, buff, boss HP, battle toggle) into human-readable log lines. It never
-// modifies packets, so it can't affect the combat-speed / combo edit path.
+// modifies packets, so it can't affect the combat-speed edit path.
 //
 // Framing (per the reference): each message is varint-length-prefixed; the real
 // byte length = lengthVarint.value + lengthVarint.byteLen - 4. A byte in

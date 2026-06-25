@@ -446,40 +446,6 @@ func extractEntityKey(data []byte, skillOffset int) uint64 {
 	return 0
 }
 
-// findTransformNextPos locates the trailing "next form" record
-// `0f 18 38 <skillIdBytes> 01 <nextId>` for the cast at skillOffset and returns
-// the byte position of its 4-byte little-endian nextId field (so it can be read
-// OR rewritten), the current nextId, and whether the record was found. The
-// position is relative to data (the payload).
-func findTransformNextPos(data []byte, skillOffset int) (pos int, nextId uint32, ok bool) {
-	if skillOffset < 0 || skillOffset+4 > len(data) {
-		return 0, 0, false
-	}
-	pat := make([]byte, 0, 8)
-	pat = append(pat, 0x0f, 0x18, 0x38)
-	pat = append(pat, data[skillOffset:skillOffset+4]...)
-	pat = append(pat, 0x01)
-	idx := bytes.Index(data, pat)
-	if idx < 0 {
-		return 0, 0, false
-	}
-	p := idx + len(pat)
-	if p+4 > len(data) {
-		return 0, 0, false
-	}
-	return p, binary.LittleEndian.Uint32(data[p : p+4]), true
-}
-
-// findTransformNext returns the "next form" skill ID for a transform-cycle
-// cast. Returns 0 when the cast isn't a transform skill (no such record).
-func findTransformNext(data []byte, skillOffset int) uint32 {
-	_, id, ok := findTransformNextPos(data, skillOffset)
-	if !ok {
-		return 0
-	}
-	return id
-}
-
 // ── Stream reassembly for entity (character) detection ────────
 
 var gameMsgDelimiter = []byte{0x06, 0x00, 0x36}

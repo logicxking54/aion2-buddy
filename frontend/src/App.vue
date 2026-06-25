@@ -3,14 +3,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CaptureBar from './components/CaptureBar.vue'
 import ChangelogModal from './components/ChangelogModal.vue'
-import Overlay from './components/Overlay.vue'
 import Sidebar from './components/Sidebar.vue'
 import TitleBar from './components/TitleBar.vue'
 import { config, loadConfig } from './config'
 import { initCapture, running, start, stop } from './captureController'
 import { setLocale } from './i18n'
 import { projects } from './projects/registry'
-import { WindowSetAlwaysOnTop, WindowSetSize } from '../wailsjs/runtime/runtime'
 
 const { t } = useI18n()
 
@@ -31,30 +29,16 @@ watch(
   },
 )
 
-// Overlay mode shrinks the window to a small always-on-top HUD; off restores it.
-const NORMAL_W = 850
-const NORMAL_H = 1000
-const OVERLAY_W = 392
-const OVERLAY_H = 240
-function applyOverlay(on: boolean) {
-  WindowSetAlwaysOnTop(on)
-  WindowSetSize(on ? OVERLAY_W : NORMAL_W, on ? OVERLAY_H : NORMAL_H)
-}
-watch(() => config.overlay, (on) => applyOverlay(on))
-
-// Load settings, wire capture events (so the overlay works even if we launch
-// straight into it), and apply the persisted language + overlay mode.
+// Load settings, wire capture events, and apply the persisted language.
 onMounted(async () => {
   await loadConfig()
   setLocale(config.language)
   initCapture()
-  if (config.overlay) applyOverlay(true)
 })
 </script>
 
 <template>
-  <Overlay v-if="config.overlay" />
-  <div v-else class="flex h-screen w-screen flex-col overflow-hidden bg-ink-800 font-sans text-slate-200">
+  <div class="flex h-screen w-screen flex-col overflow-hidden bg-ink-800 font-sans text-slate-200">
     <TitleBar />
 
     <div class="flex min-h-0 flex-1">

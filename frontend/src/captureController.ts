@@ -34,27 +34,6 @@ export const errorMsg = ref('')
 export const gameDetected = ref(false)
 export const logs = reactive<LogEntry[]>([])
 
-
-// Recently used skills (newest first), for the overlay HUD. Each cast is a
-// numeric skill id; the UI maps it to a Skill for image/name.
-export interface CastEntry {
-  id: number
-  uid: number
-}
-export const recentCasts = reactive<CastEntry[]>([])
-const MAX_RECENT = 10
-let castUid = 1
-let lastCastId = 0
-let lastCastAt = 0
-
-// Live cast tracking for the stats panel. `casting` = a skill was used recently
-// (drives the live/green vs offline look); `castCount` = how many casts in this
-// burst, reset after CAST_RESET_MS of no casts.
-export const castCount = ref(0)
-export const casting = ref(false)
-const LIVE_WINDOW_MS = 2000 // no cast for this long → not "live" anymore
-const CAST_RESET_MS = 8000 // no cast for this long → clear the count + recent list
-
 function stamp() {
   return new Date().toTimeString().slice(0, 8)
 }
@@ -156,35 +135,11 @@ export async function initCapture() {
     config.casterRecord = caster
     log('Auto-detected caster ' + caster, 'info')
   })
-  EventsOn('capture:cast', (c: { id: number }) => {
-    if (!c || typeof c.id !== 'number') return
-    const now = Date.now()
-    if (c.id === lastCastId && now - lastCastAt < 250) return // drop retransmit duplicate
-    lastCastId = c.id
-    lastCastAt = now
-    recentCasts.unshift({ id: c.id, uid: castUid++ })
-    if (recentCasts.length > MAX_RECENT) recentCasts.splice(MAX_RECENT)
-    castCount.value++
-    casting.value = true
-  })
   EventsOn('game:status', (v: boolean) => {
     gameDetected.value = !!v
   })
   // Mod menu file-operation lines (e.g. intro remove/restore) share the log box.
   EventsOn('mod:log', (m: string) => log(String(m)))
-
-  // Drive the live indicator + idle reset for the stats panel.
-  setInterval(() => {
-    if (lastCastAt === 0) return
-    const idle = Date.now() - lastCastAt
-    if (idle > LIVE_WINDOW_MS) casting.value = false
-    if (idle > CAST_RESET_MS) {
-      castCount.value = 0
-      casting.value = false
-      recentCasts.splice(0)
-      lastCastAt = 0
-    }
-  }, 500)
 
   await loadConfig()
   if (captureAvailable()) {

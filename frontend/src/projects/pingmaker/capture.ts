@@ -25,7 +25,6 @@ interface CaptureBackend {
   SetCatalog(entries: CatalogEntry[]): Promise<void>
   SetCharacterNames(names: string[]): Promise<void>
   SetInspect(on: boolean, all: boolean): Promise<void>
-  SetComboTest(on: boolean): Promise<void>
   SetDecode(on: boolean): Promise<void>
   SetSessionRecord(on: boolean): Promise<string>
   SetCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void>
@@ -70,11 +69,6 @@ export async function setCharacterNames(names: string[]): Promise<void> {
 export async function setInspect(on: boolean, all: boolean): Promise<void> {
   const b = backend()
   if (b) await b.SetInspect(on, all)
-}
-
-export async function setComboTest(on: boolean): Promise<void> {
-  const b = backend()
-  if (b) await b.SetComboTest(on)
 }
 
 export async function setDecode(on: boolean): Promise<void> {

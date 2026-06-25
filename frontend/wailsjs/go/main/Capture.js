@@ -26,10 +26,6 @@ export function SetCharacterNames(arg1) {
   return window['go']['main']['Capture']['SetCharacterNames'](arg1);
 }
 
-export function SetComboTest(arg1) {
-  return window['go']['main']['Capture']['SetComboTest'](arg1);
-}
-
 export function SetDecode(arg1) {
   return window['go']['main']['Capture']['SetDecode'](arg1);
 }

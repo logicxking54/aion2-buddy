@@ -14,8 +14,6 @@ export function SetCatalog(arg1:Array<capture.CatalogEntry>):Promise<void>;
 
 export function SetCharacterNames(arg1:Array<string>):Promise<void>;
 
-export function SetComboTest(arg1:boolean):Promise<void>;
-
 export function SetDecode(arg1:boolean):Promise<void>;
 
 export function SetInspect(arg1:boolean,arg2:boolean):Promise<void>;

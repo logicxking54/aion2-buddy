@@ -84,12 +84,6 @@ func (c *Capture) SetInspect(on bool, all bool) {
 	c.engine.SetInspect(on, all)
 }
 
-// SetComboTest toggles the experimental combo-chain next-id rewrite
-// (Burst→Ice Chain→Pyroclasm).
-func (c *Capture) SetComboTest(on bool) {
-	c.engine.SetComboTest(on)
-}
-
 // SetDecode toggles full per-cast field decoding to the log.
 func (c *Capture) SetDecode(on bool) {
 	c.engine.SetDecode(on)

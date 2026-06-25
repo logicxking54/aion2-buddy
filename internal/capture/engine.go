@@ -132,9 +132,6 @@ func describeCast(data []byte, skillOffset int, names map[uint32]string) string 
 			fmt.Fprintf(&b, " speed=%d", sp)
 		}
 	}
-	if _, nx, ok := findTransformNextPos(data, skillOffset); ok {
-		fmt.Fprintf(&b, " rec[cast:%s next:%s]", fmtID(sid, names), fmtID(nx, names))
-	}
 	return b.String()
 }
 
@@ -171,36 +168,32 @@ type Engine struct {
 	cfgFirstBytes map[byte]struct{}
 	lookup        map[uint32]skillCfg
 	// Full catalog (all known skills) — used to log every cast, not just configured ones.
-	catIDs        map[uint32]struct{}
-	catFirstBytes map[byte]struct{}
-	idToName      map[uint32]string
-	recentUsed    map[uint64]int64 // dedupe "used" log lines per (skill, action tick)
-	lastActAt     map[uint32]int64 // last 0x02 ACT time per skill id (guards 0x00 buff casts)
-	tracker       *entityTracker   // character-name filter ("only my skills")
-	reasm         streamReassembler
-	curPorts      map[int]struct{}     // server/proxy ports of the active handle (for direction)
-	lastReqByConn map[int]int64        // client port -> last outbound time (ns), for RTT
-	lastReqPkt    map[int][]byte       // client port -> last outbound payload, for request decoding
-	autoMode      bool                 // compute bonus from ping instead of per-skill field
-	autoBase      float64              // packet add at 0ms ping
-	autoPerMs     float64              // extra packet add per ms of ping
-	pingEWMA      float64              // smoothed ping (ms); written only by packet goroutine
-	pingHasValue  bool
-	lastPingEmit  int64
-	inspect       bool              // packet inspector enabled
-	inspectAll    bool              // true = dump every inbound packet; false = only skill casts
-	inspectCount  int64             // emitted-message counter (capped)
-	comboTest     bool              // experimental combo-chain next-id rewrite
-	comboMap      map[uint32]uint32 // source skill family (id/10000) -> exact target id (nextId rewrite)
-	comboCastMap  map[uint32]uint32 // source skill family -> exact target id (castId rewrite experiment)
-	comboSkillMap map[uint32]uint32 // source skill family -> exact target id (main skill_id rewrite)
-	decode        bool              // print all decoded fields for each cast
-	maskOn        bool              // FPS mask: rewrite other players' cast skill_id to Dodge
-	maskKeep      uint64            // your caster (entity key) left untouched; 0 = not locked yet
-	maskDodge     uint32            // skill_id written over masked casts (a no-VFX Dodge id)
-	casterFilter  uint64            // engine-level caster filter: only this caster is processed; 0 = all
+	catIDs          map[uint32]struct{}
+	catFirstBytes   map[byte]struct{}
+	idToName        map[uint32]string
+	recentUsed      map[uint64]int64 // dedupe "used" log lines per (skill, action tick)
+	lastActAt       map[uint32]int64 // last 0x02 ACT time per skill id (guards 0x00 buff casts)
+	tracker         *entityTracker   // character-name filter ("only my skills")
+	reasm           streamReassembler
+	curPorts        map[int]struct{} // server/proxy ports of the active handle (for direction)
+	lastReqByConn   map[int]int64    // client port -> last outbound time (ns), for RTT
+	lastReqPkt      map[int][]byte   // client port -> last outbound payload, for request decoding
+	autoMode        bool             // compute bonus from ping instead of per-skill field
+	autoBase        float64          // packet add at 0ms ping
+	autoPerMs       float64          // extra packet add per ms of ping
+	pingEWMA        float64          // smoothed ping (ms); written only by packet goroutine
+	pingHasValue    bool
+	lastPingEmit    int64
+	inspect         bool           // packet inspector enabled
+	inspectAll      bool           // true = dump every inbound packet; false = only skill casts
+	inspectCount    int64          // emitted-message counter (capped)
+	decode          bool           // print all decoded fields for each cast
+	maskOn          bool           // FPS mask: rewrite other players' cast skill_id to Dodge
+	maskKeep        uint64         // your caster (entity key) left untouched; 0 = not locked yet
+	maskDodge       uint32         // skill_id written over masked casts (a no-VFX Dodge id)
+	casterFilter    uint64         // engine-level caster filter: only this caster is processed; 0 = all
 	casterAutoCount map[uint64]int // per-caster ACT tally for always-on auto-detect
-	running       bool
+	running         bool
 
 	stop       chan struct{}
 	ports      *portTracker
@@ -310,94 +303,6 @@ func (e *Engine) SetAuto(enabled bool, base, perMs float64) {
 		e.emitLog(fmt.Sprintf("Auto-mode ON (add = %.0f + %.0f x ping)", b, p))
 	} else {
 		e.emitLog("Auto-mode OFF")
-	}
-}
-
-// comboNextExperiment rewrites the nextId (chain follow-up) in a cast's trailing
-// record to an EXACT skill id. Each entry: when castSkill is cast, its record's
-// nextId is overwritten with toID.
-var comboNextExperiment = []struct {
-	castSkill string
-	toID      uint32
-}{
-	{"Burst", 15090240},     // Burst's next -> Ice Chain (exact, rank 0240)
-	{"Ice Chain", 15250240}, // Ice Chain's next -> Pyroclasm (exact, rank 0240)
-	{"Pyroclasm", 15210240}, // Pyroclasm's next -> Flame Arrow (exact, rank 0240)
-}
-
-// comboCastIdExperiment rewrites the castId LABEL inside a cast's trailing record
-// to an EXACT skill id (not a family/tier swap — the precise id is written). Used
-// to observe how the client reacts to a mislabelled record. Each entry: when
-// castSkill is cast, its record's castId is overwritten with toID.
-var comboCastIdExperiment = []struct {
-	castSkill string
-	toID      uint32
-}{
-	// (none) — castId stays the cast's own skill; only nextId edits are active.
-}
-
-// comboSkillIdExperiment rewrites the cast's MAIN skill_id (at skillOffset, the
-// id that identifies the cast itself — not the trailing record) to an EXACT id.
-// Each entry: when castSkill is cast, the server-response skill_id is overwritten
-// with toID. Applied AFTER speed detection and the trailing-record edits (both of
-// which key off the original id), so it doesn't disturb them.
-var comboSkillIdExperiment = []struct {
-	castSkill string
-	toID      uint32
-}{
-	// (none) — no main skill_id edits.
-}
-
-// SetComboTest toggles the experimental combo-chain rewrite. When on, a chain
-// cast's trailing "next form" id is rewritten to point at the next skill in
-// comboTestChain (same tier), changing which skill the client offers as the
-// follow-up. It can only REDIRECT an existing chain record — it cannot create a
-// combo button where the packet carries none. Requires the catalog to be loaded
-// (SetCatalog) so skill names resolve to id families.
-func (e *Engine) SetComboTest(on bool) {
-	e.mu.Lock()
-	e.comboTest = on
-	// nextId experiment: source skill family -> EXACT target id to write.
-	m := map[uint32]uint32{}
-	for _, ex := range comboNextExperiment {
-		if src, ok := e.familyOfLocked(ex.castSkill); ok {
-			m[src] = ex.toID
-		}
-	}
-	e.comboMap = m
-	// castId experiment: source skill family -> EXACT target id to write.
-	cm := map[uint32]uint32{}
-	for _, ex := range comboCastIdExperiment {
-		if src, ok := e.familyOfLocked(ex.castSkill); ok {
-			cm[src] = ex.toID
-		}
-	}
-	e.comboCastMap = cm
-	// main skill_id experiment: source skill family -> EXACT target id to write.
-	sm := map[uint32]uint32{}
-	for _, ex := range comboSkillIdExperiment {
-		if src, ok := e.familyOfLocked(ex.castSkill); ok {
-			sm[src] = ex.toID
-		}
-	}
-	e.comboSkillMap = sm
-	names := e.idToName
-	e.mu.Unlock()
-	if !on {
-		e.emitLog("Combo-chain TEST OFF")
-		return
-	}
-	for _, ex := range comboNextExperiment {
-		e.emitLog(fmt.Sprintf("Combo-chain TEST ON, next edit: %s record next -> %s", ex.castSkill, fmtID(ex.toID, names)))
-	}
-	for _, ex := range comboCastIdExperiment {
-		e.emitLog(fmt.Sprintf("Combo-chain TEST ON, castId edit: %s record castId -> %s", ex.castSkill, fmtID(ex.toID, names)))
-	}
-	for _, ex := range comboSkillIdExperiment {
-		e.emitLog(fmt.Sprintf("Combo-chain TEST ON, skillId edit: %s cast skill_id -> %s", ex.castSkill, fmtID(ex.toID, names)))
-	}
-	if len(m) == 0 && len(cm) == 0 && len(sm) == 0 {
-		e.emitLog("Combo-chain TEST ON (no edits configured)")
 	}
 }
 
@@ -570,37 +475,6 @@ func (e *Engine) recordCast(ch chan string, fields string) {
 	case ch <- line:
 	default:
 	}
-}
-
-// replaceU32After replaces every little-endian uint32 occurrence of oldVal with
-// newVal in raw, scanning payload from `from` to the end (payload aliases raw, so
-// edits are visible to the scan and won't re-match). Returns how many it changed.
-// Used by the combo "change everywhere" pass to catch the next-skill id wherever
-// trailing sub-records reference it, not just in the next-form record.
-func replaceU32After(raw, payload []byte, payloadOffset, from int, oldVal, newVal uint32) int {
-	var ob [4]byte
-	binary.LittleEndian.PutUint32(ob[:], oldVal)
-	n := 0
-	for i := from; i+4 <= len(payload); i++ {
-		if payload[i] == ob[0] && payload[i+1] == ob[1] && payload[i+2] == ob[2] && payload[i+3] == ob[3] {
-			binary.LittleEndian.PutUint32(raw[payloadOffset+i:payloadOffset+i+4], newVal)
-			n++
-			i += 3 // step past this match
-		}
-	}
-	return n
-}
-
-// familyOfLocked returns the id family (id/10000) of the named skill, found from
-// the loaded catalog. Caller must hold e.mu. All variants of one skill share a
-// family (e.g. every Burst id is 1503xxxx), so the first match is enough.
-func (e *Engine) familyOfLocked(name string) (uint32, bool) {
-	for id, n := range e.idToName {
-		if n == name {
-			return id / 10000, true
-		}
-	}
-	return 0, false
 }
 
 // updatePing folds a new RTT sample into the smoothed ping and emits it
@@ -1158,10 +1032,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	autoPerMs := e.autoPerMs
 	inspect := e.inspect
 	inspectAll := e.inspectAll
-	comboTest := e.comboTest
-	comboMap := e.comboMap
-	comboCastMap := e.comboCastMap
-	comboSkillMap := e.comboSkillMap
 	decode := e.decode
 	maskOn := e.maskOn
 	maskKeep := e.maskKeep
@@ -1404,12 +1274,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			}
 		}
 
-		// Structured cast event for transform-cycle tracking in the UI: the
-		// cast's skill id + the "next form" the shared slot becomes (0 if the
-		// skill isn't a transform skill). Set-based on the UI side, so safe to
-		// re-emit on combos/retransmits.
-		e.fire("capture:cast", map[string]any{"id": hh.id, "next": findTransformNext(payload, hh.offset)})
-
 		if inspect && !inspectAll {
 			e.emitInspect(payload, "cast "+name, hh.offset)
 		}
@@ -1421,12 +1285,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			e.emitLog(annotateCast(payload, hh.offset, idToName))
 		}
 
-		// Locate the attack-speed field on the ORIGINAL packet, BEFORE the combo
-		// block runs. The combo castId rewrite erases the family bytes that
-		// findAttackSpeedOffset validates against, so detecting here keeps the
-		// speed edit working for a skill whose castId we relabel. The field's
-		// offset is unchanged by the combo edit (which only touches the trailing
-		// record), so applying it to raw afterward is still correct.
+		// Locate the attack-speed field for configured skills.
 		var spdOff, spdLen int
 		var spdVal uint64
 		var isFloat, spdFound bool
@@ -1447,91 +1306,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			e.recordCast(sessionCh, fmt.Sprintf(
 				`"id":%d,"caster":%d,"spdFound":%t,"spdRel":%d,"spdVal":%d,"float":%t,"willEdit":%t,"result":"processed"`,
 				hh.id, caster, spdFound, spdRel, spdVal, isFloat, spdFound && spdVal >= 10000))
-		}
-
-		// Combo-chain test: rewrite this cast's trailing record
-		// (`0f 18 38 <castId:4> 01 <nextId:4>`) in place. Two independent edits:
-		//   nextId  — redirect the chain follow-up to another skill (same tier).
-		//   castId  — relabel which skill the record belongs to (experiment).
-		// Runs before the speed edit (which `continue`s for configured skills).
-		// Both nextId and castId are EXACT id writes (the precise target id).
-		// recCast/recNext capture the record's OUTGOING values so the rec[…] log
-		// suffix is accurate even after a castId relabel (which would otherwise
-		// make the record unfindable by this skill's id).
-		var recCast, recNext uint32
-		recHave := false
-		if comboTest {
-			fam := hh.id / 10000
-			nextTargetID, doNext := comboMap[fam]
-			castTargetID, doCast := comboCastMap[fam]
-			if doNext || doCast {
-				if pos, oldNext, found := findTransformNextPos(payload, hh.offset); found {
-					// Record layout `0f 18 38 <castId:4> 01 <nextId:4>`: castId
-					// starts 5 bytes before nextId (4 id bytes + the 0x01 marker).
-					castPos := pos - 5
-					oldCast := uint32(0)
-					if castPos >= 0 {
-						oldCast = binary.LittleEndian.Uint32(payload[castPos : castPos+4])
-					}
-					newNext, newCast := oldNext, oldCast
-					extraRefs := 0
-					if doNext {
-						newNext = nextTargetID // exact target id, written verbatim
-						binary.LittleEndian.PutUint32(raw[payloadOffset+pos:payloadOffset+pos+4], newNext)
-						// "Change everywhere": replace any OTHER references to the old
-						// next-skill id in the rest of the packet (the next-form record
-						// at pos is already newNext, so it won't re-match).
-						if newNext != oldNext {
-							extraRefs = replaceU32After(raw, payload, payloadOffset, hh.offset, oldNext, newNext)
-						}
-					}
-					if doCast && castPos >= 0 {
-						newCast = castTargetID // exact target id, written verbatim
-						binary.LittleEndian.PutUint32(raw[payloadOffset+castPos:payloadOffset+castPos+4], newCast)
-					}
-					recCast, recNext, recHave = newCast, newNext, true
-					if newNext != oldNext || newCast != oldCast {
-						modified = true
-						e.countModify()
-						extra := ""
-						if extraRefs > 0 {
-							extra = fmt.Sprintf(" (+%d more next-refs)", extraRefs)
-						}
-						// Show the whole record before and after the edit.
-						e.emitLog(fmt.Sprintf("Combo %s edited: was[cast:%s next:%s] now[cast:%s next:%s]%s%s",
-							name, fmtID(oldCast, idToName), fmtID(oldNext, idToName),
-							fmtID(newCast, idToName), fmtID(newNext, idToName), extra, casterOnly))
-					}
-				} else {
-					e.emitLog(fmt.Sprintf("Combo %s: no chain record in packet (nothing to rewrite)%s", name, casterOnly))
-				}
-			}
-		}
-
-		// rec[…] reflects the OUTGOING packet (what the client receives). Prefer the
-		// values the combo block captured (accurate even after a castId relabel);
-		// otherwise re-locate the record by this skill's id (unedited skills).
-		casterStr := casterOnly
-		if !recHave {
-			if rpos, rnext, rok := findTransformNextPos(payload, hh.offset); rok && rpos >= 5 {
-				recCast, recNext, recHave = binary.LittleEndian.Uint32(payload[rpos-5:rpos-1]), rnext, true
-			}
-		}
-		if recHave {
-			casterStr += fmt.Sprintf(" rec[cast:%s next:%s]", fmtID(recCast, idToName), fmtID(recNext, idToName))
-		}
-
-		// Main skill_id rewrite: change the id that identifies this cast itself.
-		// Done LAST (after speed detection + trailing-record edits, which key off
-		// the original id) and before the speed block so its `continue` can't skip
-		// it. The speed field's offset is unaffected (it's located on the original).
-		if comboTest && hh.offset+4 <= len(payload) {
-			if newSkill, ok := comboSkillMap[hh.id/10000]; ok && newSkill != hh.id {
-				binary.LittleEndian.PutUint32(raw[payloadOffset+hh.offset:payloadOffset+hh.offset+4], newSkill)
-				modified = true
-				e.countModify()
-				e.emitLog(fmt.Sprintf("Combo %s: skillId %s => %s%s", name, fmtID(hh.id, idToName), fmtID(newSkill, idToName), casterOnly))
-			}
 		}
 
 		// Modify configured skills' combat speed (using the speed field located
@@ -1620,13 +1394,18 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			}
 		}
 
-		// Otherwise just log the cast (deduped per skill + action tick).
+		// Otherwise just log the cast (deduped per skill + action tick). Include the
+		// packet_type so it's easy to spot buff (0x00) vs ACT (0x02) casts in the log.
 		tick := byte(0)
 		if hh.offset+4 < len(payload) {
 			tick = payload[hh.offset+4]
 		}
+		pt := byte(0xff)
+		if hh.offset+5 < len(payload) {
+			pt = payload[hh.offset+5]
+		}
 		if e.shouldLogUsed(hh.id, tick) {
-			e.emitLog("Used " + name + casterStr)
+			e.emitLog(fmt.Sprintf("Used %s%s [pt: %d]", name, casterOnly, pt))
 		}
 	}
 }
