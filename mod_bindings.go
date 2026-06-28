@@ -90,3 +90,30 @@ func (m *Mod) ApplyNIC() (gamemod.TweakStatus, error) {
 func (m *Mod) RevertNIC() (gamemod.TweakStatus, error) {
 	return gamemod.RevertNIC(m.emitLog)
 }
+
+// --- Disable Skill Effects (override .pak in Content\Paks) ------------------
+// A prebuilt combined override pak (every class's skill VFX disabled) is
+// downloaded on first enable and dropped into the game's Paks folder. Strictly
+// gated to the exact game build it was made for (SkillEffectInfo.Compatible).
+
+// emitFxProgress forwards skill-effect-mod download progress (0–100) to the UI.
+func (m *Mod) emitFxProgress(pct int) {
+	if m.ctx != nil {
+		runtime.EventsEmit(m.ctx, "mod:fxprogress", pct)
+	}
+}
+
+// SkillEffectStatus reports whether the mod is found/compatible/applied.
+func (m *Mod) SkillEffectStatus() gamemod.SkillEffectInfo {
+	return gamemod.SkillEffectStatus()
+}
+
+// ApplySkillEffect downloads (first time) and installs the override pak.
+func (m *Mod) ApplySkillEffect() (gamemod.SkillEffectInfo, error) {
+	return gamemod.ApplySkillEffect(m.emitLog, m.emitFxProgress)
+}
+
+// RevertSkillEffect removes the override pak from the Paks folder.
+func (m *Mod) RevertSkillEffect() (gamemod.SkillEffectInfo, error) {
+	return gamemod.RevertSkillEffect(m.emitLog)
+}

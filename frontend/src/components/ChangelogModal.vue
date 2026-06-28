@@ -19,6 +19,12 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.0',
+    changes: [
+      { en: 'New Mod: "Disable Skill Effects" — removes every class\'s skill cast visual effects on your screen for higher FPS and a clearer view. Downloads a mod pack on first enable; restart the game to apply; fully reversible.', th: 'ม็อดใหม่ "ปิดเอฟเฟกต์สกิล" — ลบเอฟเฟกต์ตอนร่ายสกิลของทุกคลาสบนจอของคุณ เพื่อ FPS สูงขึ้นและจอโล่ง โหลดม็อดครั้งแรกที่เปิด รีสตาร์ตเกมเพื่อให้มีผล ย้อนกลับได้ทั้งหมด' },
+    ],
+  },
+  {
     version: '1.1.2',
     changes: [
       { en: 'Fixed caster auto-detect in party play — it now locks onto your own caster instantly from your edit-list skills, instead of flipping to teammates and skipping your speed edits', th: 'แก้ caster auto-detect ในปาร์ตี้ — ล็อก caster ของคุณทันทีจากสกิลใน edit list แทนที่จะสลับไปหาเพื่อนจนข้ามการแก้ speed ของคุณ' },

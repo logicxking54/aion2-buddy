@@ -41,6 +41,28 @@ export namespace capture {
 
 export namespace gamemod {
 	
+	export class SkillEffectInfo {
+	    found: boolean;
+	    paksDir: string;
+	    applied: boolean;
+	    gameVersion: string;
+	    supported: string;
+	    compatible: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillEffectInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.found = source["found"];
+	        this.paksDir = source["paksDir"];
+	        this.applied = source["applied"];
+	        this.gameVersion = source["gameVersion"];
+	        this.supported = source["supported"];
+	        this.compatible = source["compatible"];
+	    }
+	}
 	export class Status {
 	    moviesDir: string;
 	    found: boolean;

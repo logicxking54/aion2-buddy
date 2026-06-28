@@ -34,6 +34,11 @@ export default {
     tcpDesc: 'Disable Nagle batching and delayed ACKs so small game packets send instantly. System-wide; restores your original settings when off.',
     nicTitle: 'Network adapter tuning',
     nicDesc: 'Turn off interrupt moderation, packet coalescing and power-saving on your network card for lower jitter. The adapter resets briefly when toggled.',
+    skillfxTitle: 'Disable Skill Effects',
+    skillfxDesc: "Removes every class's skill cast visual effects (all players, on your screen) for higher FPS and a clearer view. Animation, damage and gameplay are untouched. Restart the game to apply.",
+    skillfxNote: 'Downloads ~49 MB on first enable · fully reversible',
+    skillfxIncompatible: "Built for game v{supported}, but the game is v{game} — can't enable. Update the app after a game patch.",
+    skillfxDownloading: 'Downloading mod… {pct}%',
   },
   settings: {
     language: 'Language',

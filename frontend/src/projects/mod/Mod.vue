@@ -19,6 +19,18 @@ interface TweakStatus {
   detail: string
 }
 
+// Status for the "Disable Skill Effects" mod (mirrors gamemod.SkillEffectInfo).
+// It drops a prebuilt override .pak into Content\Paks, but only for the exact
+// game build it was made for — `compatible` gates whether it can be enabled.
+interface SkillEffectStatus {
+  found: boolean
+  paksDir: string
+  applied: boolean
+  gameVersion: string
+  supported: string
+  compatible: boolean
+}
+
 interface ModBackend {
   IntroStatus(): Promise<IntroStatus>
   RemoveIntro(): Promise<IntroStatus>
@@ -29,6 +41,9 @@ interface ModBackend {
   NICStatus(): Promise<TweakStatus>
   ApplyNIC(): Promise<TweakStatus>
   RevertNIC(): Promise<TweakStatus>
+  SkillEffectStatus(): Promise<SkillEffectStatus>
+  ApplySkillEffect(): Promise<SkillEffectStatus>
+  RevertSkillEffect(): Promise<SkillEffectStatus>
 }
 function backend(): ModBackend | undefined {
   return (window as any)?.go?.main?.Mod
@@ -120,9 +135,61 @@ async function toggleSys(m: SysMod) {
   }
 }
 
+// --- Disable Skill Effects (override .pak in Content\Paks) ------------------
+const fx = reactive({
+  found: false,
+  applied: false,
+  compatible: false,
+  paksDir: '',
+  gameVersion: '',
+  supported: '',
+  busy: false,
+  progress: -1, // download %, -1 when not downloading
+})
+
+function applyFxStatus(s: SkillEffectStatus) {
+  fx.found = !!s.found
+  fx.applied = !!s.applied
+  fx.compatible = !!s.compatible
+  fx.paksDir = s.paksDir ?? ''
+  fx.gameVersion = s.gameVersion ?? ''
+  fx.supported = s.supported ?? ''
+}
+
+async function refreshFx() {
+  const b = backend()
+  if (!b) return
+  try {
+    applyFxStatus(await b.SkillEffectStatus())
+  } catch (e: any) {
+    error.value = String(e?.message ?? e)
+  }
+}
+
+async function toggleFx() {
+  const b = backend()
+  if (!b || fx.busy) return
+  fx.busy = true
+  error.value = ''
+  fx.progress = fx.applied ? -1 : 0 // show a 0% bar straight away when enabling
+  try {
+    applyFxStatus(fx.applied ? await b.RevertSkillEffect() : await b.ApplySkillEffect())
+  } catch (e: any) {
+    error.value = String(e?.message ?? e)
+    await refreshFx() // re-sync the toggle with the real on-disk state
+  } finally {
+    fx.busy = false
+    fx.progress = -1
+  }
+}
+
 onMounted(() => {
   refreshIntro()
   for (const m of sysMods) refreshSys(m)
+  refreshFx()
+  // Download progress for the skill-effect mod (emitted by the Go backend).
+  const rt = (window as any)?.runtime
+  if (rt?.EventsOn) rt.EventsOn('mod:fxprogress', (pct: number) => { fx.progress = Number(pct) })
 })
 </script>
 
@@ -186,6 +253,53 @@ onMounted(() => {
           <span
             class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
             :class="m.applied ? 'left-[22px]' : 'left-0.5'"
+          />
+        </button>
+      </li>
+
+      <!-- Disable Skill Effects (override .pak in Content\Paks) -->
+      <li
+        class="flex items-center gap-4 rounded-xl border bg-ink-700 p-4 transition"
+        :class="fx.applied ? 'border-accent/40' : 'border-white/5'"
+      >
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-bold text-white">{{ t('mod.skillfxTitle') }}</div>
+          <div class="text-xs text-slate-400">{{ t('mod.skillfxDesc') }}</div>
+          <div
+            class="mt-1 truncate text-[11px]"
+            :class="fx.found && fx.compatible ? 'text-slate-500' : 'text-amber-400'"
+          >
+            <template v-if="!available">{{ t('mod.backendUnavailable') }}</template>
+            <template v-else-if="fx.busy && fx.progress >= 0">⬇ {{ t('mod.skillfxDownloading', { pct: fx.progress }) }}</template>
+            <template v-else-if="!fx.found">{{ t('mod.notFound') }}</template>
+            <template v-else-if="!fx.compatible">
+              ⚠ {{ t('mod.skillfxIncompatible', { supported: fx.supported, game: fx.gameVersion || '?' }) }}
+            </template>
+            <template v-else>📦 {{ t('mod.skillfxNote') }}</template>
+          </div>
+          <!-- download progress bar -->
+          <div
+            v-if="fx.busy && fx.progress >= 0"
+            class="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-slate-700"
+          >
+            <div
+              class="h-full rounded-full bg-accent transition-all duration-150"
+              :style="{ width: fx.progress + '%' }"
+            />
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="fx.applied"
+          :disabled="!available || !fx.found || !fx.compatible || fx.busy"
+          @click="toggleFx"
+          class="relative h-6 w-11 shrink-0 rounded-full transition disabled:cursor-not-allowed disabled:opacity-40"
+          :class="fx.applied ? 'bg-accent' : 'bg-slate-600'"
+        >
+          <span
+            class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
+            :class="fx.applied ? 'left-[22px]' : 'left-0.5'"
           />
         </button>
       </li>

@@ -6,6 +6,10 @@ export function ApplyNIC() {
   return window['go']['main']['Mod']['ApplyNIC']();
 }
 
+export function ApplySkillEffect() {
+  return window['go']['main']['Mod']['ApplySkillEffect']();
+}
+
 export function ApplyTCP() {
   return window['go']['main']['Mod']['ApplyTCP']();
 }
@@ -34,8 +38,16 @@ export function RevertNIC() {
   return window['go']['main']['Mod']['RevertNIC']();
 }
 
+export function RevertSkillEffect() {
+  return window['go']['main']['Mod']['RevertSkillEffect']();
+}
+
 export function RevertTCP() {
   return window['go']['main']['Mod']['RevertTCP']();
+}
+
+export function SkillEffectStatus() {
+  return window['go']['main']['Mod']['SkillEffectStatus']();
 }
 
 export function TCPStatus() {
