@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { classes, skills, skillColor, type Skill, type SkillClass } from './skills'
 import errorImage from '../../assets/images/skill-error.svg'
 import { config, loadConfig, saveConfig } from '../../config'
+import { actCasters, pickCaster } from '../../captureController'
 
 const { t } = useI18n()
 
@@ -215,6 +216,23 @@ onMounted(async () => {
           class="ml-auto w-20 rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-right text-sm text-white outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
         />
         <span class="text-[11px] text-slate-500">%</span>
+      </div>
+
+      <!-- Caster picker: only shown when >1 player cast your configured skill (same
+           class in the party). Pick your own name so only your casts get edited. -->
+      <div
+        v-if="actCasters.length > 1"
+        class="mt-2 flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-200"
+      >
+        <span>{{ t('ping.whoAmI') }}</span>
+        <select
+          :value="config.casterRecord"
+          @change="pickCaster(Number(($event.target as HTMLSelectElement).value))"
+          class="ml-auto rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-sm text-white outline-none focus:border-accent/60"
+        >
+          <option :value="0" disabled>{{ t('ping.pickName') }}</option>
+          <option v-for="c in actCasters" :key="c.id" :value="c.id">{{ c.name || ('ID:' + c.id) }}</option>
+        </select>
       </div>
 
       <!-- Search added skills -->

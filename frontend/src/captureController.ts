@@ -34,6 +34,17 @@ export const errorMsg = ref('')
 export const gameDetected = ref(false)
 export const logs = reactive<LogEntry[]>([])
 
+// Recent casters of your configured skills (last ~20 ACTs), for the caster picker.
+export interface ActCaster {
+  id: number
+  name: string
+}
+export const actCasters = ref<ActCaster[]>([])
+// Pick your own caster from the dropdown (same-class party case); 0 = all casters.
+export function pickCaster(id: number) {
+  config.casterRecord = Number(id) || 0
+}
+
 function stamp() {
   return new Date().toTimeString().slice(0, 8)
 }
@@ -127,13 +138,21 @@ export async function initCapture() {
   EventsOn('capture:ping', (p: number) => {
     ping.value = p ?? 0
   })
-  // Caster auto-detect (always on in the engine) locked a new caster: reflect it
-  // in the runtime display field only. The engine already set its own filter, and
-  // the caster id changes every session so it's intentionally not persisted.
-  EventsOn('capture:caster-auto', (caster: number) => {
-    if (!Number.isFinite(caster) || caster <= 0) return
-    config.casterRecord = caster
-    log('Auto-detected caster ' + caster, 'info')
+  // Caster picker: the engine emits the distinct casters of YOUR configured skills
+  // seen in the last ~20 ACT casts (with character names). One caster → auto-lock
+  // the filter; several (same-class party members) → the UI shows a name picker.
+  // The rolling window self-clears stale casters on a session change.
+  EventsOn('capture:act-casters', (list: ActCaster[]) => {
+    actCasters.value = Array.isArray(list) ? list : []
+    const cur = Number(config.casterRecord)
+    if (actCasters.value.length === 1) {
+      config.casterRecord = actCasters.value[0].id // unambiguous → auto-lock
+    } else if (actCasters.value.length > 1) {
+      // ambiguous (same-class): keep your pick if it's still casting, else wait
+      if (!actCasters.value.some((c) => c.id === cur)) config.casterRecord = 0
+    } else {
+      config.casterRecord = 0
+    }
   })
   EventsOn('game:status', (v: boolean) => {
     gameDetected.value = !!v

@@ -68,6 +68,8 @@ export default {
     character: 'Your character',
     characterPlaceholder: 'Character name(s)',
     detecting: 'detecting…',
+    whoAmI: 'Your character',
+    pickName: 'Select your name…',
     active: 'Active skills',
     defaultSpeed: 'Default combat speed bonus %',
     combatSpeed: 'Combat speed bonus %',

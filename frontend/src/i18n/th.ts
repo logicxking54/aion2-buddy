@@ -68,6 +68,8 @@ export default {
     character: 'ตัวละครของคุณ',
     characterPlaceholder: 'ชื่อตัวละคร',
     detecting: 'กำลังตรวจจับ…',
+    whoAmI: 'ตัวละครของคุณ',
+    pickName: 'เลือกชื่อของคุณ…',
     active: 'สกิลที่ใช้งาน',
     defaultSpeed: 'โบนัสความเร็วคอมแบตเริ่มต้น %',
     combatSpeed: 'โบนัสความเร็วคอมแบต %',

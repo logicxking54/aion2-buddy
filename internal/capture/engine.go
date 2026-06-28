@@ -184,14 +184,17 @@ type Engine struct {
 	pingEWMA      float64          // smoothed ping (ms); written only by packet goroutine
 	pingHasValue  bool
 	lastPingEmit  int64
-	inspect       bool   // packet inspector enabled
-	inspectAll    bool   // true = dump every inbound packet; false = only skill casts
-	inspectCount  int64  // emitted-message counter (capped)
-	decode        bool   // print all decoded fields for each cast
-	maskOn        bool   // FPS mask: rewrite other players' cast skill_id to Dodge
-	maskKeep      uint64 // your caster (entity key) left untouched; 0 = not locked yet
-	maskDodge     uint32 // skill_id written over masked casts (a no-VFX Dodge id)
-	casterFilter  uint64 // engine-level caster filter: only this caster is processed; 0 = all
+	inspect       bool              // packet inspector enabled
+	inspectAll    bool              // true = dump every inbound packet; false = only skill casts
+	inspectCount  int64             // emitted-message counter (capped)
+	decode        bool              // print all decoded fields for each cast
+	maskOn        bool              // FPS mask: rewrite other players' cast skill_id to Dodge
+	maskKeep      uint64            // your caster (entity key) left untouched; 0 = not locked yet
+	maskDodge     uint32            // skill_id written over masked casts (a no-VFX Dodge id)
+	casterFilter  uint64            // engine-level caster filter: only this caster is processed; 0 = all
+	actorNames    map[uint64]string // learned actor_id -> character name (for the caster picker)
+	actLog        []uint64          // rolling window of recent configured-skill ACT casters
+	actSig        string            // signature of the last emitted act-casters list (dedupe)
 	running       bool
 
 	stop       chan struct{}
@@ -222,6 +225,7 @@ func NewEngine(emit func(event string, payload any)) *Engine {
 		recentUsed:    map[uint64]int64{},
 		lastActAt:     map[uint32]int64{},
 		tracker:       newEntityTracker(),
+		actorNames:    map[uint64]string{},
 		curPorts:      map[int]struct{}{},
 		lastReqByConn: map[int]int64{},
 		lastReqPkt:    map[int][]byte{},
@@ -349,20 +353,40 @@ func (e *Engine) SetCasterFilter(id uint64) {
 	e.mu.Unlock()
 }
 
-// bumpCasterAuto locks the caster filter onto the caster of any ACT cast of one of
-// YOUR configured skills (callers already gate on that). Auto-detect is always on
-// and immediate: the first/changed caster becomes the active filter right away — no
-// counting threshold. Returns the caster id only when the filter actually CHANGES,
-// so the UI updates without spamming on every cast by the same caster; else 0.
-// (A same-class party member casting your exact skill can still flip it — deferred.)
-func (e *Engine) bumpCasterAuto(caster uint64) uint64 {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if caster != e.casterFilter {
-		e.casterFilter = caster
-		return caster
+const actLogMax = 20 // rolling window of recent configured-skill ACT casts
+
+// actCaster is one recent caster of a configured-skill ACT cast, with its learned
+// character name (empty until a name binding is seen in the stream).
+type actCaster struct {
+	ID   uint64 `json:"id"`
+	Name string `json:"name"`
+}
+
+// recordActCaster appends a configured-skill ACT cast's caster to a rolling window
+// of the last actLogMax casts, then emits the DISTINCT casters in that window (with
+// any learned name) as "capture:act-casters". The UI auto-locks the filter when
+// only one caster is present, and shows a name picker when several are (a same-class
+// party member casting your skill). Dedupes on the emitted list so it stays quiet.
+// Runs only on the single packet goroutine, so the window needs no extra locking.
+func (e *Engine) recordActCaster(caster uint64) {
+	e.actLog = append(e.actLog, caster)
+	if len(e.actLog) > actLogMax {
+		e.actLog = e.actLog[len(e.actLog)-actLogMax:]
 	}
-	return 0
+	seen := map[uint64]bool{}
+	list := make([]actCaster, 0, 4)
+	for _, id := range e.actLog {
+		if !seen[id] {
+			seen[id] = true
+			list = append(list, actCaster{ID: id, Name: e.actorNames[id]})
+		}
+	}
+	sig := fmt.Sprint(list)
+	if sig == e.actSig {
+		return
+	}
+	e.actSig = sig
+	e.fire("capture:act-casters", list)
 }
 
 // SetDecode toggles full per-cast field decoding to the log.
@@ -704,6 +728,10 @@ func (e *Engine) Start(skills []SkillSpeed) error {
 	e.pingHasValue = false
 	e.lastPingEmit = 0
 	e.reasm.reset()
+	e.actLog = nil
+	e.actSig = ""
+	e.casterFilter = 0
+	e.actorNames = map[uint64]string{}
 	atomic.StoreUint64(&e.modified, 0)
 	e.mu.Unlock()
 
@@ -902,10 +930,7 @@ func (e *Engine) editCompressedCasts(
 		// so it still sees every caster of your own skill.
 		if caster != 0 {
 			if _, conf := lookup[hh.id]; conf {
-				if locked := e.bumpCasterAuto(caster); locked != 0 {
-					e.emitLog(fmt.Sprintf("Auto-detected caster %d", locked))
-					e.fire("capture:caster-auto", locked)
-				}
+				e.recordActCaster(caster)
 			}
 		}
 		cfg, isConfigured := lookup[hh.id]
@@ -1108,6 +1133,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 
 	// Entity learning: feed the stream and lock onto the player's character key.
 	for _, b := range e.reasm.feed(payload) {
+		e.actorNames[b.actorID] = b.name // learn EVERY player's name, for the caster picker
 		if name, locked := e.tracker.onBinding(b.actorID, b.name); locked {
 			e.emitLog("Locked onto " + name)
 			e.fire("capture:character", name)
@@ -1193,10 +1219,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		// every caster of your own skill.
 		if is02 && caster != 0 {
 			if _, conf := lookup[hh.id]; conf {
-				if locked := e.bumpCasterAuto(caster); locked != 0 {
-					e.emitLog(fmt.Sprintf("Auto-detected caster %d", locked))
-					e.fire("capture:caster-auto", locked)
-				}
+				e.recordActCaster(caster)
 			}
 		}
 
