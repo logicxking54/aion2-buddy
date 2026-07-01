@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { classes, skills, skillColor, type Skill, type SkillClass } from './skills'
+import SkillPicker from './SkillPicker.vue'
 import errorImage from '../../assets/images/skill-error.svg'
 import { config, loadConfig, saveConfig } from '../../config'
 import { actCasters, pickCaster } from '../../captureController'
@@ -46,7 +47,9 @@ interface ConfigRow {
   speedPct: number
   overridden: boolean
   brk: boolean
+  swapId: string // render this skill's casts as another skill (by slug); '' = off
 }
+
 
 let nextUid = 1
 const rows = reactive<ConfigRow[]>([])
@@ -66,7 +69,11 @@ watch(defaultSpeed, (val) => {
 })
 
 function addSkill(skill: Skill) {
-  rows.push({ uid: nextUid++, skill, speedPct: defaultSpeed.value, overridden: false, brk: false })
+  rows.push({ uid: nextUid++, skill, speedPct: defaultSpeed.value, overridden: false, brk: false, swapId: '' })
+  writeConfig()
+}
+function setRowSwap(row: ConfigRow, value: string) {
+  row.swapId = value
   writeConfig()
 }
 function setRowSpeed(row: ConfigRow, value: string) {
@@ -77,10 +84,6 @@ function setRowSpeed(row: ConfigRow, value: string) {
 function resetRowSpeed(row: ConfigRow) {
   row.speedPct = defaultSpeed.value
   row.overridden = false
-  writeConfig()
-}
-function toggleBreak(row: ConfigRow) {
-  row.brk = !row.brk
   writeConfig()
 }
 function removeRow(uid: number) {
@@ -99,7 +102,7 @@ let loading = false // suppress saves while restoring on mount
 function writeConfig() {
   if (loading) return
   config.defaultSpeed = defaultSpeed.value
-  config.rows = rows.map((r) => ({ id: r.skill.id, speedPct: r.speedPct, overridden: r.overridden, brk: r.brk }))
+  config.rows = rows.map((r) => ({ id: r.skill.id, speedPct: r.speedPct, overridden: r.overridden, brk: r.brk, swapId: r.swapId || '' }))
   saveConfig()
 }
 
@@ -118,6 +121,7 @@ onMounted(async () => {
         speedPct: Number(r.speedPct) || 0,
         overridden: !!r.overridden,
         brk: !!r.brk,
+        swapId: r.swapId && byId.has(r.swapId) ? r.swapId : '',
       })
     }
   }
@@ -277,25 +281,16 @@ onMounted(async () => {
             <div v-else class="text-[11px] text-slate-600">{{ t('ping.unclassified') }}</div>
           </div>
 
-          <!-- Break toggle -->
-          <button
-            type="button"
-            @click="toggleBreak(row)"
-            :title="t('ping.breakHint')"
-            class="shrink-0 rounded-md px-2 py-1 text-[11px] font-bold transition"
-            :class="row.brk ? 'bg-amber-400/20 text-amber-300 ring-1 ring-amber-400/40' : 'text-slate-500 hover:bg-white/5'"
-          >{{ t('ping.break') }}</button>
-
-          <!-- Speed input (typing overrides the default) -->
-          <label class="flex shrink-0 items-center gap-1.5" :class="row.brk ? 'opacity-40' : ''">
+          <!-- Combat speed (typing overrides the default) -->
+          <label class="flex shrink-0 items-center gap-1.5" :title="t('ping.combatSpeed')">
+            <span class="text-sm" aria-hidden="true">⚡</span>
             <input
               :value="row.speedPct"
               @input="setRowSpeed(row, ($event.target as HTMLInputElement).value)"
-              :disabled="row.brk"
               type="number"
               min="0"
               step="10"
-              class="w-20 rounded-md border bg-ink-900 px-2 py-1 text-right text-sm text-white placeholder:text-accent/70 outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
+              class="w-16 rounded-md border bg-ink-900 px-2 py-1 text-right text-sm text-white outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
               :class="row.overridden ? 'border-accent/40' : 'border-white/10'"
             />
             <span class="text-[11px] text-slate-500">%</span>
@@ -307,6 +302,15 @@ onMounted(async () => {
               :title="t('ping.resetDefault')"
             >↺</button>
           </label>
+
+          <!-- Render-as override: draw this skill's casts as another skill -->
+          <div class="w-40 shrink-0" :title="t('ping.swapHint')">
+            <SkillPicker
+              :model-value="row.swapId"
+              :exclude-id="row.skill.id"
+              @update:model-value="setRowSwap(row, $event)"
+            />
+          </div>
 
           <button
             type="button"

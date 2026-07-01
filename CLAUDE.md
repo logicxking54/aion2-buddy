@@ -8,7 +8,10 @@ Guidance for working in this repo. Read the `memory/` notes (loaded via MEMORY.m
 
 Menus (each is a "project" under `frontend/src/projects/`, registered in `registry.ts`):
 - **Ping Maker** — the core feature. Intercepts the game's TCP packets with WinDivert and rewrites the combat-speed field of configured skills so casts play faster. **Requires admin** (WinDivert kernel driver).
-- **Mod** — reversible game tweaks (remove intro video, TCP latency tuning, NIC tuning). Writes game files / system settings with backups for rollback.
+- **Mod** — reversible on/off toggles (`internal/gamemod`):
+  - File/system tweaks: remove intro video, TCP latency tuning, NIC tuning — writes game files / system settings with backups for rollback.
+  - **Disable Skill Effects** — drops a prebuilt override pak (all player skill-cast Niagara VFX off) into `Content\Paks`, downloaded from a static host + checksum-verified. **Strictly version-gated to the exact game build** (`GameVersion == skillEffectVersion`); every game update needs the pak re-cooked and 3 constants bumped in `skilleffect_windows.go`. Pipeline + `tools/effect-mod/disabler` in `memory/aion2-effect-mod-pipeline.md`.
+  - **Disable other players' skill animations** (`config.animMask`) — not a file mod: a live capture-engine packet rewrite (only takes effect while Ping Maker capture is running; `CaptureBar` pushes it to the engine).
 - **Packet Inspector** (dev-only) — dump captured packets (hex + opcodes), record full sessions to JSONL, decode casts.
 - **Settings**.
 

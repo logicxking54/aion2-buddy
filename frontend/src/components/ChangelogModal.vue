@@ -19,6 +19,14 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.3',
+    changes: [
+      { en: 'Ping Maker: each skill can now be rendered as another skill — pick a "Render as" target (with icons) to show a different cast animation/effect (client-side only; the real skill still fires).', th: 'Ping Maker: แต่ละสกิลเลือกให้แสดงเป็นอีกสกิลได้แล้ว — เลือก "แสดงเป็น" (มีรูปสกิล) เพื่อให้ร่ายออกมาเป็นท่า/เอฟเฟกต์ของสกิลอื่น (เปลี่ยนแค่ภาพ สกิลจริงยังทำงานเหมือนเดิม)' },
+      { en: 'Caster selection is now sticky — once you pick your caster it no longer flips to a same-class teammate who casts your skill; they just appear as a selectable option.', th: 'การเลือก caster อยู่หมัดแล้ว — พอเลือกตัวเองแล้วจะไม่เด้งไปหาเพื่อนคลาสเดียวกันที่ร่ายสกิลเดียวกัน (เพื่อนจะโผล่เป็นตัวเลือกให้เลือกเองแทน)' },
+      { en: 'Removed the Break button from skill rows.', th: 'เอาปุ่ม Break ออกจากแถวสกิล' },
+    ],
+  },
+  {
     version: '1.2.2',
     changes: [
       { en: 'Updated "Disable Skill Effects" for the latest game build (adds the new class). Re-enable it in the Mod menu after this update.', th: 'อัปเดต "ปิดเอฟเฟกต์สกิล" ให้รองรับเกมเวอร์ชันล่าสุด (รวมคลาสใหม่) — เปิดใช้งานใหม่ในเมนู Mod หลังอัปเดตนี้' },

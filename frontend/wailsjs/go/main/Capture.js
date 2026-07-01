@@ -42,6 +42,10 @@ export function SetSessionRecord(arg1) {
   return window['go']['main']['Capture']['SetSessionRecord'](arg1);
 }
 
+export function SetSkillSwap(arg1, arg2, arg3) {
+  return window['go']['main']['Capture']['SetSkillSwap'](arg1, arg2, arg3);
+}
+
 export function StartCapture(arg1) {
   return window['go']['main']['Capture']['StartCapture'](arg1);
 }

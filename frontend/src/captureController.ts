@@ -12,6 +12,7 @@ import {
   isCapturing,
   setCasterFilter,
   setCatalog,
+  setSkillSwap,
   startCapture,
   stopCapture,
   updateCapture,
@@ -89,6 +90,35 @@ function buildConfig(): SkillSpeed[] {
   return out
 }
 
+// Build the skill-override map from rows that picked a "render as" skill: every
+// variant id of the row's skill maps to the target skill's base id, so the client
+// draws the target's animation + VFX for that cast (server outcome unchanged).
+function buildSwap(): { from: number[]; to: number[] } {
+  const byId = new Map(skills.map((s) => [s.id, s]))
+  const from: number[] = []
+  const to: number[] = []
+  for (const r of config.rows) {
+    if (!r.swapId) continue
+    const src = byId.get(r.id)
+    const dst = byId.get(r.swapId)
+    if (!src || !dst || dst.skill_ids.length === 0) continue
+    const target = dst.skill_ids[0]
+    for (const id of src.skill_ids) {
+      from.push(id)
+      to.push(target)
+    }
+  }
+  return { from, to }
+}
+
+// Push the current override map to the engine. Safe to call anytime — the engine
+// holds the map and only applies it while capturing. from.length 0 clears it.
+function pushSwap() {
+  if (!captureAvailable()) return
+  const { from, to } = buildSwap()
+  setSkillSwap(from.length > 0, from, to).catch(() => {})
+}
+
 export async function start() {
   errorMsg.value = ''
   if (!captureAvailable()) {
@@ -138,21 +168,19 @@ export async function initCapture() {
   EventsOn('capture:ping', (p: number) => {
     ping.value = p ?? 0
   })
-  // Caster picker: the engine emits the distinct casters of YOUR configured skills
-  // seen in the last ~20 ACT casts (with character names). One caster → auto-lock
-  // the filter; several (same-class party members) → the UI shows a name picker.
-  // The rolling window self-clears stale casters on a session change.
+  // Caster picker: the engine emits every distinct caster of YOUR configured skills
+  // seen this session (with character names) as selectable options. Your selection
+  // is STICKY — once a caster is chosen (auto or manual) it's never replaced while
+  // it's still a known caster; other players casting your skills only ever get added
+  // as options, they can't flip the filter. Auto-lock happens only when there's no
+  // valid pick yet: a single caster locks automatically, several wait for a manual
+  // pick. A stale pick from a previous session (its id absent from the fresh list
+  // after the engine resets on a session change) is dropped and re-locked.
   EventsOn('capture:act-casters', (list: ActCaster[]) => {
     actCasters.value = Array.isArray(list) ? list : []
     const cur = Number(config.casterRecord)
-    if (actCasters.value.length === 1) {
-      config.casterRecord = actCasters.value[0].id // unambiguous → auto-lock
-    } else if (actCasters.value.length > 1) {
-      // ambiguous (same-class): keep your pick if it's still casting, else wait
-      if (!actCasters.value.some((c) => c.id === cur)) config.casterRecord = 0
-    } else {
-      config.casterRecord = 0
-    }
+    if (cur > 0 && actCasters.value.some((c) => c.id === cur)) return // keep your pick
+    config.casterRecord = actCasters.value.length === 1 ? actCasters.value[0].id : 0
   })
   EventsOn('game:status', (v: boolean) => {
     gameDetected.value = !!v
@@ -167,13 +195,16 @@ export async function initCapture() {
     if (running.value) status.value = 'running'
   }
 
-  // Keep the engine in sync with config edits made from any menu.
+  // Keep the engine in sync with config edits made from any menu: combat-speed
+  // rows (only while running) and the per-row skill override map (safe anytime;
+  // also re-pushed when capture starts so the override is restored).
   watch(
-    () => config.rows,
+    [() => config.rows, running],
     () => {
       if (running.value) updateCapture(buildConfig()).catch(() => {})
+      pushSwap()
     },
-    { deep: true },
+    { deep: true, immediate: true },
   )
 
   // Manual caster filter: the user types the caster entity key (0/blank = all).

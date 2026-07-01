@@ -193,9 +193,10 @@ type Engine struct {
 	maskDodge     uint32            // skill_id written over masked casts (a no-VFX Dodge id)
 	animMaskOn    bool              // "disable skill anims except mine": rewrite non-edit-list, non-own casts
 	animMaskID    uint32            // skill_id written over anim-masked casts (a tiny no-anim skill)
+	swapMap       map[uint32]uint32 // Ping Maker "render as" override: rewrite a cast's skill_id to another; nil = off
 	casterFilter  uint64            // engine-level caster filter: only this caster is processed; 0 = all
 	actorNames    map[uint64]string // learned actor_id -> character name (for the caster picker)
-	actLog        []uint64          // rolling window of recent configured-skill ACT casters
+	actLog        []uint64          // distinct configured-skill ACT casters seen this session (picker options)
 	actSig        string            // signature of the last emitted act-casters list (dedupe)
 	running       bool
 
@@ -371,6 +372,42 @@ func (e *Engine) SetAnimMask(on bool, replaceID uint32) {
 	}
 }
 
+// SetSkillSwap sets the Ping Maker "render as" override: an in-place, same-length
+// rewrite of a cast's main skill_id to another skill's id, so the client renders the
+// chosen skill's animation + VFX (server-side outcome is unchanged). from[i] -> to[i]
+// pairwise (every configured skill's variants -> the target skill's base id). Applies
+// to ALL casters and works on both plaintext and LZ4-compressed (party) casts. Passing
+// on=false (or empty lists) clears it. The mapping is small (a few skills' variants),
+// so we build a fresh map each call under the lock.
+func (e *Engine) SetSkillSwap(on bool, from, to []uint32) {
+	e.mu.Lock()
+	was := e.swapMap != nil
+	if !on || len(from) == 0 {
+		e.swapMap = nil
+	} else {
+		m := make(map[uint32]uint32, len(from))
+		for i := range from {
+			if i < len(to) && to[i] != 0 && to[i] != from[i] {
+				m[from[i]] = to[i]
+			}
+		}
+		if len(m) == 0 {
+			m = nil
+		}
+		e.swapMap = m
+	}
+	nowOn := e.swapMap != nil
+	n := len(e.swapMap)
+	e.mu.Unlock()
+
+	switch {
+	case nowOn && !was:
+		e.emitLog(fmt.Sprintf("Skill-swap (test) ON — %d id(s) remapped", n))
+	case !nowOn && was:
+		e.emitLog("Skill-swap (test) OFF")
+	}
+}
+
 // SetCasterFilter sets the engine-level caster filter. When id != 0, only casts
 // from that caster (entity key) are processed — every other caster is ignored
 // entirely: no log line, no cast event, and no combat-speed edit. id == 0 clears
@@ -383,7 +420,7 @@ func (e *Engine) SetCasterFilter(id uint64) {
 	e.mu.Unlock()
 }
 
-const actLogMax = 20 // rolling window of recent configured-skill ACT casts
+const actLogMax = 20 // max distinct ACT casters kept as picker options
 
 // actCaster is one recent caster of a configured-skill ACT cast, with its learned
 // character name (empty until a name binding is seen in the stream).
@@ -392,24 +429,31 @@ type actCaster struct {
 	Name string `json:"name"`
 }
 
-// recordActCaster appends a configured-skill ACT cast's caster to a rolling window
-// of the last actLogMax casts, then emits the DISTINCT casters in that window (with
-// any learned name) as "capture:act-casters". The UI auto-locks the filter when
-// only one caster is present, and shows a name picker when several are (a same-class
-// party member casting your skill). Dedupes on the emitted list so it stays quiet.
-// Runs only on the single packet goroutine, so the window needs no extra locking.
+// recordActCaster accumulates the DISTINCT casters of your configured skills (in
+// first-seen order) for the current session and emits them (with any learned name)
+// as "capture:act-casters". Anyone who casts a configured skill stays in the list
+// even after they stop casting, so the picker never loses a valid option — the UI
+// keeps your selection sticky and only auto-locks when there's no valid pick yet.
+// Reset() clears the list on a session change, which lets the UI drop a stale
+// (previous-session) caster id and re-lock. Dedupes the emitted list so it stays
+// quiet. Runs only on the single packet goroutine, so the list needs no extra lock.
 func (e *Engine) recordActCaster(caster uint64) {
-	e.actLog = append(e.actLog, caster)
-	if len(e.actLog) > actLogMax {
-		e.actLog = e.actLog[len(e.actLog)-actLogMax:]
-	}
-	seen := map[uint64]bool{}
-	list := make([]actCaster, 0, 4)
+	known := false
 	for _, id := range e.actLog {
-		if !seen[id] {
-			seen[id] = true
-			list = append(list, actCaster{ID: id, Name: e.actorNames[id]})
+		if id == caster {
+			known = true
+			break
 		}
+	}
+	if !known {
+		e.actLog = append(e.actLog, caster)
+		if len(e.actLog) > actLogMax {
+			e.actLog = e.actLog[len(e.actLog)-actLogMax:] // bound: drop the oldest option
+		}
+	}
+	list := make([]actCaster, 0, len(e.actLog))
+	for _, id := range e.actLog {
+		list = append(list, actCaster{ID: id, Name: e.actorNames[id]})
 	}
 	sig := fmt.Sprint(list)
 	if sig == e.actSig {
@@ -933,7 +977,7 @@ func (e *Engine) editCompressedCasts(
 	scanIDs map[uint32]struct{}, scanFB map[byte]struct{},
 	lookup map[uint32]skillCfg, idToName map[uint32]string,
 	casterFilter uint64, filtering, autoMode bool, autoBase, autoPerMs float64,
-	animMaskOn bool, animMaskID uint32,
+	animMaskOn bool, animMaskID uint32, swapMap map[uint32]uint32,
 ) (handled, edited bool) {
 	blockStart, origLen, ok := parseLZ4Frame(payload)
 	if !ok {
@@ -962,6 +1006,32 @@ func (e *Engine) editCompressedCasts(
 		if caster != 0 {
 			if _, conf := lookup[hh.id]; conf {
 				e.recordActCaster(caster)
+			}
+		}
+
+		// Skill-swap ("render as" override) in compressed (party) casts: rewrite the cast's
+		// skill_id to another skill, mapping the 4 id bytes back into the LZ4 block
+		// literals (length-preserving). Unreachable when any id byte is an LZ4
+		// back-reference match (rare). Applies to any caster; skips the rest on swap.
+		if swapMap != nil && hh.offset+4 <= len(clean) {
+			if to, ok := swapMap[hh.id]; ok {
+				var b [4]byte
+				binary.LittleEndian.PutUint32(b[:], to)
+				reachable := true
+				for k := 0; k < 4; k++ {
+					if hh.offset+k >= len(litSrc) || litSrc[hh.offset+k] < 0 {
+						reachable = false
+						break
+					}
+				}
+				if reachable {
+					for k := 0; k < 4; k++ {
+						raw[payloadOffset+blockStart+litSrc[hh.offset+k]] = b[k]
+					}
+					edited = true
+					e.countModify()
+				}
+				continue
 			}
 		}
 
@@ -1120,6 +1190,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	maskDodge := e.maskDodge
 	animMaskOn := e.animMaskOn
 	animMaskID := e.animMaskID
+	swapMap := e.swapMap
 	casterFilter := e.casterFilter
 	sessionCh := e.sessionCh
 	e.mu.Unlock()
@@ -1226,7 +1297,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	if lz4DecompressEdit && !maskOn {
 		if handled, ed := e.editCompressedCasts(raw, payload, payloadOffset,
 			scanIDs, scanFB, lookup, idToName, casterFilter, filtering, autoMode, autoBase, autoPerMs,
-			animMaskOn, animMaskID); handled {
+			animMaskOn, animMaskID, swapMap); handled {
 			if ed {
 				modified = true
 			}
@@ -1285,6 +1356,19 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		if is02 && caster != 0 {
 			if _, conf := lookup[hh.id]; conf {
 				e.recordActCaster(caster)
+			}
+		}
+
+		// Skill-swap ("render as" override): rewrite this cast's skill_id to another skill so the
+		// client renders the swapped skill (e.g. Pyroclasm -> Blaze). Same-length in-place
+		// edit, so the TCP stream stays in sync. Applies to any caster; once swapped we
+		// skip the rest (speed edit / mask / filter) for this hit.
+		if swapMap != nil && hh.offset+4 <= len(payload) {
+			if to, ok := swapMap[hh.id]; ok {
+				binary.LittleEndian.PutUint32(raw[payloadOffset+hh.offset:payloadOffset+hh.offset+4], to)
+				modified = true
+				e.countModify()
+				continue
 			}
 		}
 

@@ -111,6 +111,14 @@ func (c *Capture) SetAnimMask(on bool, replaceID uint32) {
 	c.engine.SetAnimMask(on, replaceID)
 }
 
+// SetSkillSwap sets the Ping Maker "render as" override: an in-place same-length
+// rewrite of a cast's skill_id to another skill's id, pairwise from[i] -> to[i]
+// (each configured skill's variants -> the target skill's base id), so the client
+// renders the chosen skill. on == false or empty lists clears it.
+func (c *Capture) SetSkillSwap(on bool, from []uint32, to []uint32) {
+	c.engine.SetSkillSwap(on, from, to)
+}
+
 // SetCasterFilter sets the engine-level caster filter: when id != 0, only that
 // caster's casts are processed (logged + speed-modified) and every other caster
 // is ignored. id == 0 clears it. The frontend pushes the (auto/manual) field value.
