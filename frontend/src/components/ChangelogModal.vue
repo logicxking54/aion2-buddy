@@ -19,6 +19,18 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.2',
+    changes: [
+      { en: 'Updated "Disable Skill Effects" for the latest game build (adds the new class). Re-enable it in the Mod menu after this update.', th: 'อัปเดต "ปิดเอฟเฟกต์สกิล" ให้รองรับเกมเวอร์ชันล่าสุด (รวมคลาสใหม่) — เปิดใช้งานใหม่ในเมนู Mod หลังอัปเดตนี้' },
+    ],
+  },
+  {
+    version: '1.2.1',
+    changes: [
+      { en: 'Moved the "Disable other players\' skill animations" toggle into the Mod menu, alongside the other mods.', th: 'ย้ายปุ่ม "ปิดอนิเมชั่นสกิลของผู้เล่นคนอื่น" ไปไว้ในเมนู Mod รวมกับม็อดอื่นๆ' },
+    ],
+  },
+  {
     version: '1.2.0',
     changes: [
       { en: 'New Mod: "Disable Skill Effects" — removes every class\'s skill cast visual effects on your screen for higher FPS and a clearer view. Downloads a mod pack on first enable; restart the game to apply; fully reversible.', th: 'ม็อดใหม่ "ปิดเอฟเฟกต์สกิล" — ลบเอฟเฟกต์ตอนร่ายสกิลของทุกคลาสบนจอของคุณ เพื่อ FPS สูงขึ้นและจอโล่ง โหลดม็อดครั้งแรกที่เปิด รีสตาร์ตเกมเพื่อให้มีผล ย้อนกลับได้ทั้งหมด' },

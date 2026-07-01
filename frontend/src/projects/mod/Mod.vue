@@ -1,8 +1,19 @@
 <script lang="ts" setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { config, saveConfig } from '../../config'
+import { running } from '../../captureController'
 
 const { t } = useI18n()
+
+// --- Disable other players' skill animations (live packet rewrite) ----------
+// Unlike the other mods this is not a game-file/system change: it's a runtime
+// flag the capture engine reads. Toggling just flips `config.animMask` (persisted)
+// — CaptureBar owns pushing it into the engine while capture is running.
+function toggleAnim() {
+  config.animMask = !config.animMask
+  saveConfig()
+}
 
 // Backend status for the intro mod (mirrors gamemod.Status in Go). The game
 // folder is auto-detected (no path to type), and detection works whether or not
@@ -196,6 +207,34 @@ onMounted(() => {
 <template>
   <div class="mx-auto flex h-full max-w-3xl flex-col gap-3">
     <ul class="space-y-3">
+      <!-- Disable other players' skill animations (live packet rewrite) -->
+      <li
+        class="flex items-center gap-4 rounded-xl border bg-ink-700 p-4 transition"
+        :class="config.animMask ? 'border-accent/40' : 'border-white/5'"
+      >
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-bold text-white">{{ t('mod.animTitle') }}</div>
+          <div class="text-xs text-slate-400">{{ t('mod.animDesc') }}</div>
+          <div class="mt-1 truncate text-[11px]" :class="running ? 'text-slate-500' : 'text-amber-400'">
+            <template v-if="running">⚡ {{ t('mod.animActiveNote') }}</template>
+            <template v-else>{{ t('mod.animIdleNote') }}</template>
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="config.animMask"
+          @click="toggleAnim"
+          class="relative h-6 w-11 shrink-0 rounded-full transition"
+          :class="config.animMask ? 'bg-accent' : 'bg-slate-600'"
+        >
+          <span
+            class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
+            :class="config.animMask ? 'left-[22px]' : 'left-0.5'"
+          />
+        </button>
+      </li>
+
       <!-- Remove Intro screen (game file) -->
       <li
         class="flex items-center gap-4 rounded-xl border bg-ink-700 p-4 transition"

@@ -191,6 +191,8 @@ type Engine struct {
 	maskOn        bool              // FPS mask: rewrite other players' cast skill_id to Dodge
 	maskKeep      uint64            // your caster (entity key) left untouched; 0 = not locked yet
 	maskDodge     uint32            // skill_id written over masked casts (a no-VFX Dodge id)
+	animMaskOn    bool              // "disable skill anims except mine": rewrite non-edit-list, non-own casts
+	animMaskID    uint32            // skill_id written over anim-masked casts (a tiny no-anim skill)
 	casterFilter  uint64            // engine-level caster filter: only this caster is processed; 0 = all
 	actorNames    map[uint64]string // learned actor_id -> character name (for the caster picker)
 	actLog        []uint64          // rolling window of recent configured-skill ACT casters
@@ -231,6 +233,7 @@ func NewEngine(emit func(event string, payload any)) *Engine {
 		lastReqPkt:    map[int][]byte{},
 		autoBase:      6800,
 		autoPerMs:     80,
+		animMaskID:    17000101, // default no-animation skill for the anim mask
 	}
 }
 
@@ -338,6 +341,33 @@ func (e *Engine) SetCasterMask(on bool, keepCaster uint64, dodgeID uint32) {
 		e.emitLog("FPS mask ARMED — waiting for your caster (cast a skill so we lock onto you)…")
 	case !on && wasOn:
 		e.emitLog("FPS mask OFF")
+	}
+}
+
+// SetAnimMask toggles the "disable skill animations (except mine)" mod. When on
+// AND your caster is locked (casterFilter != 0), every inbound cast that is from a
+// DIFFERENT caster AND is NOT one of your configured (edit-list) skills has its
+// main skill_id overwritten with replaceID — a tiny no-animation skill — so the
+// client renders a quick dash instead of that cast. Your own casts and edit-list
+// skills (any caster) keep their real animation. Same-length in-place edit, so the
+// TCP stream never desyncs; nothing happens until your caster is locked. Works on
+// both plaintext and LZ4-compressed (party) casts. replaceID == 0 keeps the
+// current id (default 17000101).
+func (e *Engine) SetAnimMask(on bool, replaceID uint32) {
+	e.mu.Lock()
+	was := e.animMaskOn
+	e.animMaskOn = on
+	if replaceID != 0 {
+		e.animMaskID = replaceID
+	}
+	id := e.animMaskID
+	e.mu.Unlock()
+
+	switch {
+	case on && !was:
+		e.emitLog(fmt.Sprintf("Skill-anim mask ON — others' non-edit-list casts -> skill %d (your casts + edit-list kept; lock your caster first)", id))
+	case !on && was:
+		e.emitLog("Skill-anim mask OFF")
 	}
 }
 
@@ -903,6 +933,7 @@ func (e *Engine) editCompressedCasts(
 	scanIDs map[uint32]struct{}, scanFB map[byte]struct{},
 	lookup map[uint32]skillCfg, idToName map[uint32]string,
 	casterFilter uint64, filtering, autoMode bool, autoBase, autoPerMs float64,
+	animMaskOn bool, animMaskID uint32,
 ) (handled, edited bool) {
 	blockStart, origLen, ok := parseLZ4Frame(payload)
 	if !ok {
@@ -933,6 +964,37 @@ func (e *Engine) editCompressedCasts(
 				e.recordActCaster(caster)
 			}
 		}
+
+		// "Disable skill animations (except mine)" in compressed (party) casts: rewrite
+		// a known other caster's non-edit-list cast skill_id to the no-anim skill,
+		// mapping the 4 id bytes back into the LZ4 block literals (length-preserving).
+		// Unreachable when any id byte is an LZ4 back-reference match (rare). Your own
+		// casts and edit-list skills are left untouched. Runs before the config filter.
+		if animMaskOn && casterFilter != 0 && caster != 0 && caster != casterFilter {
+			if _, inEdit := lookup[hh.id]; !inEdit {
+				if animMaskID != 0 && hh.offset+4 <= len(clean) &&
+					binary.LittleEndian.Uint32(clean[hh.offset:hh.offset+4]) != animMaskID {
+					var b [4]byte
+					binary.LittleEndian.PutUint32(b[:], animMaskID)
+					reachable := true
+					for k := 0; k < 4; k++ {
+						if hh.offset+k >= len(litSrc) || litSrc[hh.offset+k] < 0 {
+							reachable = false
+							break
+						}
+					}
+					if reachable {
+						for k := 0; k < 4; k++ {
+							raw[payloadOffset+blockStart+litSrc[hh.offset+k]] = b[k]
+						}
+						edited = true
+						e.countModify()
+					}
+				}
+				continue // other player's non-edit-list cast anim-masked
+			}
+		}
+
 		cfg, isConfigured := lookup[hh.id]
 		if !isConfigured {
 			continue
@@ -1056,6 +1118,8 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	maskOn := e.maskOn
 	maskKeep := e.maskKeep
 	maskDodge := e.maskDodge
+	animMaskOn := e.animMaskOn
+	animMaskID := e.animMaskID
 	casterFilter := e.casterFilter
 	sessionCh := e.sessionCh
 	e.mu.Unlock()
@@ -1161,7 +1225,8 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	filtering := e.tracker.isConfigured()
 	if lz4DecompressEdit && !maskOn {
 		if handled, ed := e.editCompressedCasts(raw, payload, payloadOffset,
-			scanIDs, scanFB, lookup, idToName, casterFilter, filtering, autoMode, autoBase, autoPerMs); handled {
+			scanIDs, scanFB, lookup, idToName, casterFilter, filtering, autoMode, autoBase, autoPerMs,
+			animMaskOn, animMaskID); handled {
 			if ed {
 				modified = true
 			}
@@ -1238,6 +1303,26 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 				}
 			}
 			continue // other player's cast masked; skip our own-cast processing
+		}
+
+		// "Disable skill animations (except mine)": rewrite the cast skill_id of any
+		// cast from a KNOWN other caster that is NOT one of your configured (edit-list)
+		// skills to a tiny no-animation skill, so the client shows a quick dash for it
+		// instead of the full cast. Your own casts (caster == casterFilter) and
+		// edit-list skills (any caster) keep their animation. Same-length in-place edit;
+		// armed only once your caster is locked. Runs BEFORE the caster filter below
+		// (which drops other casters), because masked casts are exactly other casters'.
+		if animMaskOn && casterFilter != 0 && caster != 0 && caster != casterFilter {
+			if _, inEdit := lookup[hh.id]; !inEdit {
+				if animMaskID != 0 && hh.offset+4 <= len(payload) {
+					if orig := binary.LittleEndian.Uint32(payload[hh.offset : hh.offset+4]); orig != animMaskID {
+						binary.LittleEndian.PutUint32(raw[payloadOffset+hh.offset:payloadOffset+hh.offset+4], animMaskID)
+						modified = true
+						e.countModify()
+					}
+				}
+				continue // other player's non-edit-list cast anim-masked
+			}
 		}
 
 		if filtering {

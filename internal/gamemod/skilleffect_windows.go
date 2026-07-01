@@ -23,9 +23,9 @@ import (
 // cached, and copied in. It's strictly gated to the exact game build it was made
 // for — a game patch can change the cooked assets and invalidate it.
 const (
-	skillEffectVersion = "79" // exact game build (VersionInfo <Version>) this targets
-	skillEffectURL     = "https://static.logicxking.com/de4b6573-dff0-4a11-bff8-e301081b2c42.zip"
-	skillEffectSHA256  = "67a38e4776b79b1d0108f51e53f8c173582aa8a53bf953e87787bbabec7245f9"
+	skillEffectVersion = "82" // exact game build (VersionInfo <Version>) this targets
+	skillEffectURL     = "https://static.logicxking.com/5a166d54-ea32-4fc0-af94-c8edc8ce2bda.zip"
+	skillEffectSHA256  = "a4cd7a02d48d7ca335a9ab6ff9b4f0a83cd64259b5311721f8316121a2755d12"
 )
 
 // The override pak MUST use patch index ≥1 (_1_P) so it outranks the base game's
@@ -203,11 +203,21 @@ func ensureSkillEffectCache(log Logger, progress ProgressFunc) (string, error) {
 		return "", err
 	}
 
+	// A marker records which build's paks are currently cached. The pak filenames
+	// are version-independent, so without this a stale pak from an older game build
+	// would short-circuit the (correct) re-download after a version bump.
+	marker := filepath.Join(cache, "skilleffect.sha")
+
 	have := true
 	for _, n := range skillEffectPakNames {
 		if !fileExists(filepath.Join(cache, n)) {
 			have = false
 			break
+		}
+	}
+	if have {
+		if b, _ := os.ReadFile(marker); strings.TrimSpace(string(b)) != skillEffectSHA256 {
+			have = false // cache is for a different build — rebuild it
 		}
 	}
 	if have {
@@ -224,7 +234,7 @@ func ensureSkillEffectCache(log Logger, progress ProgressFunc) (string, error) {
 		}
 	}
 	if needDownload {
-		log.log("Skill-effect mod: downloading ~49 MB…")
+		log.log("Skill-effect mod: downloading ~69 MB…")
 		if err := downloadFile(skillEffectURL, zipPath, log, progress); err != nil {
 			return "", fmt.Errorf("download failed: %w", err)
 		}
@@ -242,6 +252,7 @@ func ensureSkillEffectCache(log Logger, progress ProgressFunc) (string, error) {
 	if err := extractNamed(zipPath, cache, skillEffectPakNames, log); err != nil {
 		return "", fmt.Errorf("extract failed: %w", err)
 	}
+	_ = os.WriteFile(marker, []byte(skillEffectSHA256), 0o644)
 	return cache, nil
 }
 

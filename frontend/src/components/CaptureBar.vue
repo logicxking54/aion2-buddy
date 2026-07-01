@@ -3,7 +3,7 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { config, loadConfig, saveConfig } from '../config'
 import { clearLogs, errorMsg, initCapture, logs, running } from '../captureController'
-import { setCasterMask } from '../projects/pingmaker/capture'
+import { setCasterMask, setAnimMask } from '../projects/pingmaker/capture'
 
 const { t } = useI18n()
 const logBox = ref<HTMLElement | null>(null)
@@ -24,6 +24,21 @@ function toggleMask() {
   config.casterMask = !config.casterMask
   saveConfig()
 }
+
+// ── Disable skill anims (except mine) ───────────────────────────────────
+// The toggle UI lives in the Mod menu now; this watcher stays here because
+// CaptureBar is mounted under every menu, so it owns pushing `config.animMask`
+// into the engine whenever the flag or capture state changes. When on, the engine
+// rewrites every OTHER caster's cast of a skill NOT in your edit list to a tiny
+// no-animation skill (a quick dash). Your own casts and edit-list skills keep
+// their animation. Needs your caster locked (via the caster picker).
+const ANIM_MASK_SKILL_ID = 17000101 // tiny no-animation skill written over masked casts
+
+function pushAnimMask() {
+  if (!running.value) return // engine isn't capturing; nothing to mask
+  setAnimMask(config.animMask, ANIM_MASK_SKILL_ID).catch(() => {})
+}
+watch([() => config.animMask, running], pushAnimMask, { immediate: true })
 
 // ── Resizable panel height ──────────────────────────────────────────────
 const panelHeight = ref(300)

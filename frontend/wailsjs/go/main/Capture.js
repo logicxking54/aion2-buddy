@@ -6,6 +6,10 @@ export function IsCapturing() {
   return window['go']['main']['Capture']['IsCapturing']();
 }
 
+export function SetAnimMask(arg1, arg2) {
+  return window['go']['main']['Capture']['SetAnimMask'](arg1, arg2);
+}
+
 export function SetAuto(arg1, arg2, arg3) {
   return window['go']['main']['Capture']['SetAuto'](arg1, arg2, arg3);
 }

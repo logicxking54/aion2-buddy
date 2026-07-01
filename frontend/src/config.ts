@@ -18,6 +18,7 @@ export interface AppConfig {
   panelHeight: number
   devMode: boolean // show developer-only menus (e.g. Packet Inspector)
   casterMask: boolean // FPS mask: rewrite other players' casts to Dodge (dev-only)
+  animMask: boolean // disable skill anims (except mine): rewrite others' non-edit-list casts to a no-anim skill
   rows: SavedRow[]
 }
 
@@ -36,6 +37,7 @@ export const config = reactive<AppConfig>({
   panelHeight: 300,
   devMode: false,
   casterMask: false,
+  animMask: false,
   rows: [],
 })
 

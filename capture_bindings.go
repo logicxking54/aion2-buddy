@@ -103,6 +103,14 @@ func (c *Capture) SetCasterMask(on bool, keepCaster uint64, dodgeID uint32) {
 	c.engine.SetCasterMask(on, keepCaster, dodgeID)
 }
 
+// SetAnimMask toggles the "disable skill animations (except mine)" mod: when on
+// and your caster is locked, every OTHER caster's cast of a non-edit-list skill has
+// its skill_id rewritten to replaceID (a tiny no-animation skill). Your own casts
+// and edit-list skills keep their animation. replaceID == 0 keeps the current id.
+func (c *Capture) SetAnimMask(on bool, replaceID uint32) {
+	c.engine.SetAnimMask(on, replaceID)
+}
+
 // SetCasterFilter sets the engine-level caster filter: when id != 0, only that
 // caster's casts are processed (logged + speed-modified) and every other caster
 // is ignored. id == 0 clears it. The frontend pushes the (auto/manual) field value.

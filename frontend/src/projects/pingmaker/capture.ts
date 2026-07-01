@@ -28,6 +28,7 @@ interface CaptureBackend {
   SetDecode(on: boolean): Promise<void>
   SetSessionRecord(on: boolean): Promise<string>
   SetCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void>
+  SetAnimMask(on: boolean, replaceID: number): Promise<void>
   SetCasterFilter(id: number): Promise<void>
   IsCapturing(): Promise<boolean>
 }
@@ -87,6 +88,15 @@ export async function setSessionRecord(on: boolean): Promise<string> {
 export async function setCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void> {
   const b = backend()
   if (b) await b.SetCasterMask(on, keepCaster, dodgeID)
+}
+
+// setAnimMask toggles "disable skill animations (except mine)": the engine rewrites
+// every OTHER caster's non-edit-list cast skill_id to replaceID (a tiny no-anim
+// skill). Your own casts and edit-list skills keep their animation. Needs your
+// caster locked (the caster picker / auto-detect) to know which casts are yours.
+export async function setAnimMask(on: boolean, replaceID: number): Promise<void> {
+  const b = backend()
+  if (b) await b.SetAnimMask(on, replaceID)
 }
 
 export async function setCasterFilter(id: number): Promise<void> {
