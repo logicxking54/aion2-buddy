@@ -19,6 +19,12 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.5',
+    changes: [
+      { en: 'Updated "Disable Skill Effects" for the latest game build. Re-enable it in the Mod menu after this update.', th: 'อัปเดต "ปิดเอฟเฟกต์สกิล" ให้รองรับเกมเวอร์ชันล่าสุด — เปิดใช้งานใหม่ในเมนู Mod หลังอัปเดตนี้' },
+    ],
+  },
+  {
     version: '1.2.4',
     changes: [
       { en: 'Removed the "Render as" skill-replacement feature from Ping Maker.', th: 'เอาฟีเจอร์ "แสดงเป็น" (แทนสกิล) ออกจาก Ping Maker' },

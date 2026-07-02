@@ -23,9 +23,9 @@ import (
 // cached, and copied in. It's strictly gated to the exact game build it was made
 // for — a game patch can change the cooked assets and invalidate it.
 const (
-	skillEffectVersion = "82" // exact game build (VersionInfo <Version>) this targets
-	skillEffectURL     = "https://static.logicxking.com/5a166d54-ea32-4fc0-af94-c8edc8ce2bda.zip"
-	skillEffectSHA256  = "a4cd7a02d48d7ca335a9ab6ff9b4f0a83cd64259b5311721f8316121a2755d12"
+	skillEffectVersion = "83" // exact game build (VersionInfo <Version>) this targets
+	skillEffectURL     = "https://static.logicxking.com/cbdfe48d-00ea-4fd7-906d-9a585a607ac6.zip"
+	skillEffectSHA256  = "34b07741a581b168b660ca4909639b6a3de4f68235f139000454ffbd773c3d43"
 )
 
 // The override pak MUST use patch index ≥1 (_1_P) so it outranks the base game's
