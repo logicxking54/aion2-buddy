@@ -79,8 +79,6 @@ export default {
     combatSpeed: 'Combat speed bonus %',
     break: 'Break',
     breakHint: 'Bypass the speed cap — use on no-cooldown skills only',
-    swapNone: 'Render as…',
-    swapHint: "Render this skill's casts as another skill (client-side visual only — the real skill still fires). Takes effect while capturing.",
     statusError: 'Error',
     ports: 'Ports',
     modified: 'Modified',

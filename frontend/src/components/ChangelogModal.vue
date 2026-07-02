@@ -19,6 +19,12 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.4',
+    changes: [
+      { en: 'Removed the "Render as" skill-replacement feature from Ping Maker.', th: 'เอาฟีเจอร์ "แสดงเป็น" (แทนสกิล) ออกจาก Ping Maker' },
+    ],
+  },
+  {
     version: '1.2.3',
     changes: [
       { en: 'Ping Maker: each skill can now be rendered as another skill — pick a "Render as" target (with icons) to show a different cast animation/effect (client-side only; the real skill still fires).', th: 'Ping Maker: แต่ละสกิลเลือกให้แสดงเป็นอีกสกิลได้แล้ว — เลือก "แสดงเป็น" (มีรูปสกิล) เพื่อให้ร่ายออกมาเป็นท่า/เอฟเฟกต์ของสกิลอื่น (เปลี่ยนแค่ภาพ สกิลจริงยังทำงานเหมือนเดิม)' },

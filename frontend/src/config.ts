@@ -8,7 +8,6 @@ export interface SavedRow {
   speedPct: number
   overridden: boolean
   brk: boolean
-  swapId?: string // render this skill's casts as another skill (by slug); empty = no override
 }
 
 export interface AppConfig {

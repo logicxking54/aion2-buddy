@@ -62,7 +62,7 @@ func BenchmarkEditCompressedCasts(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		copy(raw, payload)
-		e.editCompressedCasts(raw, raw, 0, scanIDs, scanFB, lookup, idToName, 0, false, false, 0, 0, false, 0, nil)
+		e.editCompressedCasts(raw, raw, 0, scanIDs, scanFB, lookup, idToName, 0, false, false, 0, 0, false, 0)
 	}
 }
 
@@ -143,7 +143,7 @@ func BenchmarkInboundSession(b *testing.B) {
 		for _, p := range payloads {
 			buf := raw[:len(p)]
 			copy(buf, p)
-			if handled, _ := e.editCompressedCasts(buf, buf, 0, scanIDs, scanFB, lookup, idToName, 0, false, false, 0, 0, false, 0, nil); !handled {
+			if handled, _ := e.editCompressedCasts(buf, buf, 0, scanIDs, scanFB, lookup, idToName, 0, false, false, 0, 0, false, 0); !handled {
 				_ = findAllSkillIDs(buf, scanIDs, scanFB, scanStartDefault)
 			}
 		}

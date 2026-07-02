@@ -12,7 +12,6 @@ import {
   isCapturing,
   setCasterFilter,
   setCatalog,
-  setSkillSwap,
   startCapture,
   stopCapture,
   updateCapture,
@@ -88,35 +87,6 @@ function buildConfig(): SkillSpeed[] {
     }
   }
   return out
-}
-
-// Build the skill-override map from rows that picked a "render as" skill: every
-// variant id of the row's skill maps to the target skill's base id, so the client
-// draws the target's animation + VFX for that cast (server outcome unchanged).
-function buildSwap(): { from: number[]; to: number[] } {
-  const byId = new Map(skills.map((s) => [s.id, s]))
-  const from: number[] = []
-  const to: number[] = []
-  for (const r of config.rows) {
-    if (!r.swapId) continue
-    const src = byId.get(r.id)
-    const dst = byId.get(r.swapId)
-    if (!src || !dst || dst.skill_ids.length === 0) continue
-    const target = dst.skill_ids[0]
-    for (const id of src.skill_ids) {
-      from.push(id)
-      to.push(target)
-    }
-  }
-  return { from, to }
-}
-
-// Push the current override map to the engine. Safe to call anytime — the engine
-// holds the map and only applies it while capturing. from.length 0 clears it.
-function pushSwap() {
-  if (!captureAvailable()) return
-  const { from, to } = buildSwap()
-  setSkillSwap(from.length > 0, from, to).catch(() => {})
 }
 
 export async function start() {
@@ -195,16 +165,13 @@ export async function initCapture() {
     if (running.value) status.value = 'running'
   }
 
-  // Keep the engine in sync with config edits made from any menu: combat-speed
-  // rows (only while running) and the per-row skill override map (safe anytime;
-  // also re-pushed when capture starts so the override is restored).
+  // Keep the engine in sync with config edits made from any menu.
   watch(
-    [() => config.rows, running],
+    () => config.rows,
     () => {
       if (running.value) updateCapture(buildConfig()).catch(() => {})
-      pushSwap()
     },
-    { deep: true, immediate: true },
+    { deep: true },
   )
 
   // Manual caster filter: the user types the caster entity key (0/blank = all).

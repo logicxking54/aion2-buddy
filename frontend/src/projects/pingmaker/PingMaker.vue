@@ -2,7 +2,6 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { classes, skills, skillColor, type Skill, type SkillClass } from './skills'
-import SkillPicker from './SkillPicker.vue'
 import errorImage from '../../assets/images/skill-error.svg'
 import { config, loadConfig, saveConfig } from '../../config'
 import { actCasters, pickCaster } from '../../captureController'
@@ -47,7 +46,6 @@ interface ConfigRow {
   speedPct: number
   overridden: boolean
   brk: boolean
-  swapId: string // render this skill's casts as another skill (by slug); '' = off
 }
 
 
@@ -69,11 +67,7 @@ watch(defaultSpeed, (val) => {
 })
 
 function addSkill(skill: Skill) {
-  rows.push({ uid: nextUid++, skill, speedPct: defaultSpeed.value, overridden: false, brk: false, swapId: '' })
-  writeConfig()
-}
-function setRowSwap(row: ConfigRow, value: string) {
-  row.swapId = value
+  rows.push({ uid: nextUid++, skill, speedPct: defaultSpeed.value, overridden: false, brk: false })
   writeConfig()
 }
 function setRowSpeed(row: ConfigRow, value: string) {
@@ -102,7 +96,7 @@ let loading = false // suppress saves while restoring on mount
 function writeConfig() {
   if (loading) return
   config.defaultSpeed = defaultSpeed.value
-  config.rows = rows.map((r) => ({ id: r.skill.id, speedPct: r.speedPct, overridden: r.overridden, brk: r.brk, swapId: r.swapId || '' }))
+  config.rows = rows.map((r) => ({ id: r.skill.id, speedPct: r.speedPct, overridden: r.overridden, brk: r.brk }))
   saveConfig()
 }
 
@@ -121,7 +115,6 @@ onMounted(async () => {
         speedPct: Number(r.speedPct) || 0,
         overridden: !!r.overridden,
         brk: !!r.brk,
-        swapId: r.swapId && byId.has(r.swapId) ? r.swapId : '',
       })
     }
   }
@@ -302,15 +295,6 @@ onMounted(async () => {
               :title="t('ping.resetDefault')"
             >↺</button>
           </label>
-
-          <!-- Render-as override: draw this skill's casts as another skill -->
-          <div class="w-40 shrink-0" :title="t('ping.swapHint')">
-            <SkillPicker
-              :model-value="row.swapId"
-              :exclude-id="row.skill.id"
-              @update:model-value="setRowSwap(row, $event)"
-            />
-          </div>
 
           <button
             type="button"

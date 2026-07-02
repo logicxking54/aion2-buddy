@@ -29,7 +29,6 @@ interface CaptureBackend {
   SetSessionRecord(on: boolean): Promise<string>
   SetCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void>
   SetAnimMask(on: boolean, replaceID: number): Promise<void>
-  SetSkillSwap(on: boolean, from: number[], to: number[]): Promise<void>
   SetCasterFilter(id: number): Promise<void>
   IsCapturing(): Promise<boolean>
 }
@@ -98,14 +97,6 @@ export async function setCasterMask(on: boolean, keepCaster: number, dodgeID: nu
 export async function setAnimMask(on: boolean, replaceID: number): Promise<void> {
   const b = backend()
   if (b) await b.SetAnimMask(on, replaceID)
-}
-
-// setSkillSwap pushes the Ping Maker per-row "render as" override map: the engine
-// rewrites each cast whose skill_id is in `from` to the paired id in `to`, so the
-// client renders the chosen skill. on=false (or empty lists) clears it.
-export async function setSkillSwap(on: boolean, from: number[], to: number[]): Promise<void> {
-  const b = backend()
-  if (b) await b.SetSkillSwap(on, from, to)
 }
 
 export async function setCasterFilter(id: number): Promise<void> {
