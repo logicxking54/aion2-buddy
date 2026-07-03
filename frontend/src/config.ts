@@ -11,7 +11,7 @@ export interface SavedRow {
 }
 
 export interface AppConfig {
-  language: 'th' | 'en'
+  language: 'th' | 'en' | 'zh'
   character: string
   defaultSpeed: number
   casterRecord: number // auto-detected caster-filter entity key — RUNTIME ONLY, never persisted (changes every session)
@@ -24,9 +24,9 @@ export interface AppConfig {
 
 // Seed defaults from the legacy localStorage keys so existing settings migrate
 // into the file on first run.
-function initialLanguage(): 'th' | 'en' {
+function initialLanguage(): 'th' | 'en' | 'zh' {
   const v = localStorage.getItem('locale')
-  return v === 'en' || v === 'th' ? v : 'th'
+  return v === 'en' || v === 'th' || v === 'zh' ? v : 'th'
 }
 
 export const config = reactive<AppConfig>({

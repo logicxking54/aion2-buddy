@@ -5,9 +5,10 @@ import { config, saveConfig } from '../../config'
 
 const { t, locale } = useI18n()
 
-const languages: { id: Locale; native: string; sub: string }[] = [
-  { id: 'th', native: 'ไทย', sub: 'Thai' },
-  { id: 'en', native: 'English', sub: 'EN' },
+const languages: { id: Locale; native: string; sub: string; flag: string }[] = [
+  { id: 'th', native: 'ไทย', sub: 'Thai', flag: '🇹🇭' },
+  { id: 'en', native: 'English', sub: 'EN', flag: '🇬🇧' },
+  { id: 'zh', native: '繁體中文', sub: 'Traditional Chinese', flag: '🇹🇼' },
 ]
 
 function toggleDev() {
@@ -34,7 +35,7 @@ function toggleDev() {
             ? 'border-accent/50 bg-accent/10 ring-1 ring-accent/30'
             : 'border-white/10 bg-ink-800 hover:border-white/20'"
         >
-          <span class="text-2xl">{{ l.id === 'th' ? '🇹🇭' : '🇬🇧' }}</span>
+          <span class="text-2xl">{{ l.flag }}</span>
           <span class="flex-1">
             <span class="block text-sm font-bold text-white">{{ l.native }}</span>
             <span class="block text-xs text-slate-400">{{ l.sub }}</span>

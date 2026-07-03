@@ -15,6 +15,7 @@ function toggleAnim() {
   saveConfig()
 }
 
+
 // Backend status for the intro mod (mirrors gamemod.Status in Go). The game
 // folder is auto-detected (no path to type), and detection works whether or not
 // the game is running — the mod is meant to be applied before launch.
@@ -213,9 +214,13 @@ onMounted(() => {
         :class="config.animMask ? 'border-accent/40' : 'border-white/5'"
       >
         <div class="min-w-0 flex-1">
-          <div class="text-sm font-bold text-white">{{ t('mod.animTitle') }}</div>
+          <div class="flex items-center gap-2">
+            <div class="text-sm font-bold text-white">{{ t('mod.animTitle') }}</div>
+            <span class="shrink-0 rounded bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-300">{{ t('mod.testingBadge') }}</span>
+          </div>
           <div class="text-xs text-slate-400">{{ t('mod.animDesc') }}</div>
-          <div class="mt-1 truncate text-[11px]" :class="running ? 'text-slate-500' : 'text-amber-400'">
+          <div class="mt-1 text-[11px] font-semibold text-amber-400">⚠ {{ t('mod.animTesting') }}</div>
+          <div class="mt-0.5 truncate text-[11px]" :class="running ? 'text-slate-500' : 'text-amber-400'">
             <template v-if="running">⚡ {{ t('mod.animActiveNote') }}</template>
             <template v-else>{{ t('mod.animIdleNote') }}</template>
           </div>

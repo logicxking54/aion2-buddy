@@ -25,6 +25,8 @@ export default {
     settings: { label: 'Settings', description: 'Configure app preferences.' },
   },
   mod: {
+    testingBadge: 'Beta',
+    animTesting: 'Under testing — not recommended for use yet.',
     animTitle: "Disable other players' skill animations",
     animDesc: "Replace other players' skill animations with a quick dash (skills not in your edit list). Your own casts and edit-list skills keep their animation.",
     animActiveNote: 'Active while capturing · pick your caster in Ping Maker so it knows which casts are yours',

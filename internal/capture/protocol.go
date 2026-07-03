@@ -588,3 +588,19 @@ func tcpSequence(raw []byte) (uint32, bool) {
 	}
 	return binary.BigEndian.Uint32(raw[ipHdrLen+4 : ipHdrLen+8]), true
 }
+
+// tcpAckFlags reads the TCP ack number and flags byte from an IPv4 packet. Used by
+// the session recorder so offline analysis can separate connections and follow the
+// stream (ack for the reverse direction, flags for SYN/FIN/RST connection boundaries).
+func tcpAckFlags(raw []byte) (ack uint32, flags byte, ok bool) {
+	if len(raw) < 20 || raw[0]>>4 != 4 {
+		return 0, 0, false
+	}
+	ipHdrLen := int(raw[0]&0x0F) * 4
+	if ipHdrLen+14 > len(raw) {
+		return 0, 0, false
+	}
+	ack = binary.BigEndian.Uint32(raw[ipHdrLen+8 : ipHdrLen+12])
+	flags = raw[ipHdrLen+13]
+	return ack, flags, true
+}

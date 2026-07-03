@@ -2,17 +2,19 @@ import { createI18n } from 'vue-i18n'
 import { config, saveConfig } from '../config'
 import en from './en'
 import th from './th'
+import zh from './zh'
 
-export type Locale = 'th' | 'en'
+export type Locale = 'th' | 'en' | 'zh'
 
 const saved = localStorage.getItem('locale')
-const initial: Locale = saved === 'en' || saved === 'th' ? saved : 'th' // default: Thai
+const initial: Locale =
+  saved === 'en' || saved === 'th' || saved === 'zh' ? saved : 'th' // default: Thai
 
 export const i18n = createI18n({
   legacy: false,
   locale: initial,
   fallbackLocale: 'en',
-  messages: { en, th },
+  messages: { en, th, zh },
 })
 
 document.documentElement.setAttribute('lang', initial)

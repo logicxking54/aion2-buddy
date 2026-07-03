@@ -510,8 +510,16 @@ func (e *Engine) recordPacket(ch chan string, dir string, raw, payload []byte) {
 	if seq, ok := tcpSequence(raw); ok {
 		seqStr = strconv.FormatUint(uint64(seq), 10)
 	}
-	line := fmt.Sprintf(`{"time":"%s","dir":"%s","len":%d,"seq":%s,"hex":"%s"}`,
-		time.Now().Format("15:04:05.000"), dir, len(payload), seqStr, hex.EncodeToString(payload))
+	// ack/flags/ports let offline analysis separate connections and follow the
+	// TCP stream per connection. Best-effort.
+	ackStr, flags := "null", 0
+	if a, fl, ok := tcpAckFlags(raw); ok {
+		ackStr = strconv.FormatUint(uint64(a), 10)
+		flags = int(fl)
+	}
+	sport, dport := tcpPorts(raw)
+	line := fmt.Sprintf(`{"time":"%s","dir":"%s","sport":%d,"dport":%d,"len":%d,"seq":%s,"ack":%s,"flags":%d,"hex":"%s"}`,
+		time.Now().Format("15:04:05.000"), dir, sport, dport, len(payload), seqStr, ackStr, flags, hex.EncodeToString(payload))
 	select {
 	case ch <- line:
 	default:
@@ -774,11 +782,13 @@ func (e *Engine) Start(skills []SkillSpeed) error {
 
 	e.SetConfig(skills)
 	auditPath := ""
-	if path, err := e.resetHellfireAudit(); err == nil {
-		auditPath = path
-		e.emitLog("Hellfire audit: " + path)
-	} else {
-		e.emitLog("Hellfire audit error: " + err.Error())
+	if captureDiskLog { // only touch the on-disk audit log when explicitly enabled
+		if path, err := e.resetHellfireAudit(); err == nil {
+			auditPath = path
+			e.emitLog("Hellfire audit: " + path)
+		} else {
+			e.emitLog("Hellfire audit error: " + err.Error())
+		}
 	}
 
 	if err := prepareDriver(); err != nil {
@@ -1143,6 +1153,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		}
 		e.recordPacket(sessionCh, dir, raw, payload)
 	}
+
 	if len(scanIDs) == 0 {
 		return
 	}
