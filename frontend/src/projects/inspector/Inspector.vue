@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { EventsOn, setInspect, setSessionRecord } from '../pingmaker/capture'
+import { EventsOn, setInspect, setSessionRecord, setStatSpeed } from '../pingmaker/capture'
 import { running, start, stop, log } from '../../captureController'
 
 const { t } = useI18n()
@@ -28,6 +28,26 @@ async function toggleRecord() {
     await setSessionRecord(false).catch(() => {})
     recordOn.value = false
     log('Session recording stopped', 'info')
+  }
+}
+
+// EXPERIMENT: overwrite the combat-speed stat (0x011a) in the server's stat-recalc
+// packet (sent on equip / zone-in). Multiplier = (10000 + target) / 10000, so
+// 20000 → 3.0x. After enabling, re-trigger a recalc in-game (unequip+re-equip a
+// piece, or change zone) so the edited packet is sent. Server is authoritative —
+// this tests whether the client honours the modified resting combat speed.
+const statSpeedOn = ref(false)
+const statSpeedTarget = ref(20000)
+async function toggleStatSpeed() {
+  if (!statSpeedOn.value) {
+    if (!running.value) await start()
+    await setStatSpeed(true, Math.max(0, Math.round(statSpeedTarget.value))).catch(() => {})
+    statSpeedOn.value = true
+    log(`Stat-speed edit ON → 0x011a=${statSpeedTarget.value} (${((10000 + statSpeedTarget.value) / 10000).toFixed(2)}x). Re-equip an item or change zone to trigger.`, 'info')
+  } else {
+    await setStatSpeed(false, 0).catch(() => {})
+    statSpeedOn.value = false
+    log('Stat-speed edit OFF', 'info')
   }
 }
 
@@ -160,6 +180,24 @@ onUnmounted(() => {
         class="rounded-md px-3 py-1 text-xs font-semibold transition"
         :class="recordOn ? 'bg-red-500/20 text-red-300 ring-1 ring-red-400/30' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
       >{{ recordOn ? '● Recording' : 'Record session' }}</button>
+
+      <!-- EXPERIMENT: edit combat-speed stat 0x011a in the equip/zone stat-recalc packet -->
+      <div class="flex items-center gap-1 rounded-md bg-white/5 px-2 py-1">
+        <span class="text-xs font-semibold text-slate-400">stat spd</span>
+        <input
+          v-model.number="statSpeedTarget"
+          type="number" min="0" max="60000" step="1000"
+          title="Target for combat-speed stat 0x011a. Multiplier = (10000 + this) / 10000. e.g. 20000 = 3.0x, 8352 = normal-with-item."
+          class="w-20 rounded bg-black/30 px-1 py-0.5 text-xs text-slate-200 outline-none"
+        />
+        <button
+          type="button"
+          @click="toggleStatSpeed"
+          title="Overwrite the combat-speed stat (0x011a) in the server's stat-recalc packet (sent on equip/zone). In-place LZ4-literal edit; re-equip an item or change zone after enabling to trigger it."
+          class="rounded px-2 py-0.5 text-xs font-semibold transition"
+          :class="statSpeedOn ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/30' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
+        >{{ statSpeedOn ? '● on' : 'edit' }}</button>
+      </div>
 
       <button
         type="button"

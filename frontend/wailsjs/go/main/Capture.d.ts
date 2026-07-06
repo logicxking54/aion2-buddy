@@ -22,6 +22,8 @@ export function SetInspect(arg1:boolean,arg2:boolean):Promise<void>;
 
 export function SetSessionRecord(arg1:boolean):Promise<string>;
 
+export function SetStatSpeed(arg1:boolean,arg2:number):Promise<void>;
+
 export function StartCapture(arg1:Array<capture.SkillSpeed>):Promise<void>;
 
 export function StopCapture():Promise<void>;

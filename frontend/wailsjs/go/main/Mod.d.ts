@@ -8,8 +8,6 @@ export function ApplySkillEffect():Promise<gamemod.SkillEffectInfo>;
 
 export function ApplyTCP():Promise<gamemod.TweakStatus>;
 
-export function DetectGamePath():Promise<string>;
-
 export function IntroStatus():Promise<gamemod.Status>;
 
 export function NICStatus():Promise<gamemod.TweakStatus>;

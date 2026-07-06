@@ -20,6 +20,12 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.7',
+    changes: [
+      { en: 'Internal cleanup and maintenance.', th: 'ปรับปรุงโค้ดภายในและล้างไฟล์ที่ไม่ใช้', zh: '內部整理與維護。' },
+    ],
+  },
+  {
     version: '1.2.6',
     changes: [
       { en: 'Added Traditional Chinese (Taiwan) — pick 繁體中文 in Settings.', th: 'เพิ่มภาษาจีนตัวเต็ม (ไต้หวัน) — เลือก 繁體中文 ได้ในเมนูตั้งค่า', zh: '新增繁體中文（台灣）— 可在「設定」中選擇繁體中文。' },

@@ -3,6 +3,10 @@ build/bin
 node_modules
 frontend/dist
 
+# stray go-build artifacts (go module is "aion2tmp"; the real release binary
+# is aion2-buddy). WinDivert .dll/.sys are not .exe, so they stay tracked.
+*.exe
+
 # .NET build output for the effect-mod disabler dev tool
 tools/effect-mod/disabler/bin/
 tools/effect-mod/disabler/obj/

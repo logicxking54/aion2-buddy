@@ -118,6 +118,14 @@ func (c *Capture) SetCasterFilter(id uint64) {
 	c.engine.SetCasterFilter(id)
 }
 
+// SetStatSpeed toggles the experimental combat-speed stat edit: when on, the
+// server's stat-recalc packet (sent on equip/zone) has its combat-speed stat
+// (0x011a) overwritten so the multiplier = (10000+target)/10000. target == 0
+// keeps the current value. See engine.SetStatSpeed.
+func (c *Capture) SetStatSpeed(on bool, target uint32) {
+	c.engine.SetStatSpeed(on, target)
+}
+
 // IsCapturing reports whether capture is currently running.
 func (c *Capture) IsCapturing() bool {
 	return c.engine.IsRunning()

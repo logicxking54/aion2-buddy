@@ -42,6 +42,10 @@ export function SetSessionRecord(arg1) {
   return window['go']['main']['Capture']['SetSessionRecord'](arg1);
 }
 
+export function SetStatSpeed(arg1, arg2) {
+  return window['go']['main']['Capture']['SetStatSpeed'](arg1, arg2);
+}
+
 export function StartCapture(arg1) {
   return window['go']['main']['Capture']['StartCapture'](arg1);
 }

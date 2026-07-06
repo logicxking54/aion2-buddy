@@ -26,12 +26,6 @@ func (m *Mod) setContext(ctx context.Context) {
 	m.ctx = ctx
 }
 
-// DetectGamePath returns the auto-detected <game>\Aion2\Content\Movies folder,
-// or "" if the game couldn't be located.
-func (m *Mod) DetectGamePath() string {
-	return gamemod.DetectMoviesDir()
-}
-
 // IntroStatus reports where the game is and whether the intro is currently removed.
 func (m *Mod) IntroStatus() gamemod.Status {
 	return gamemod.GetStatus()

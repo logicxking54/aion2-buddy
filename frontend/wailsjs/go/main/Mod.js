@@ -14,10 +14,6 @@ export function ApplyTCP() {
   return window['go']['main']['Mod']['ApplyTCP']();
 }
 
-export function DetectGamePath() {
-  return window['go']['main']['Mod']['DetectGamePath']();
-}
-
 export function IntroStatus() {
   return window['go']['main']['Mod']['IntroStatus']();
 }

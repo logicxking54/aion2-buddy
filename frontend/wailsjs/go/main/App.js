@@ -6,10 +6,6 @@ export function ExportPackets(arg1, arg2) {
   return window['go']['main']['App']['ExportPackets'](arg1, arg2);
 }
 
-export function Greet(arg1) {
-  return window['go']['main']['App']['Greet'](arg1);
-}
-
 export function LoadConfig() {
   return window['go']['main']['App']['LoadConfig']();
 }

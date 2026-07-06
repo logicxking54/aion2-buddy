@@ -29,6 +29,7 @@ interface CaptureBackend {
   SetSessionRecord(on: boolean): Promise<string>
   SetCasterMask(on: boolean, keepCaster: number, dodgeID: number): Promise<void>
   SetAnimMask(on: boolean, replaceID: number): Promise<void>
+  SetStatSpeed(on: boolean, target: number): Promise<void>
   SetCasterFilter(id: number): Promise<void>
   IsCapturing(): Promise<boolean>
 }
@@ -102,6 +103,14 @@ export async function setAnimMask(on: boolean, replaceID: number): Promise<void>
 export async function setCasterFilter(id: number): Promise<void> {
   const b = backend()
   if (b) await b.SetCasterFilter(id)
+}
+
+// setStatSpeed toggles the experimental combat-speed stat edit: the engine
+// overwrites stat 0x011a in the server's equip/zone stat-recalc packet so the
+// combat-speed multiplier = (10000+target)/10000 (e.g. target 20000 → 3.0x).
+export async function setStatSpeed(on: boolean, target: number): Promise<void> {
+  const b = backend()
+  if (b) await b.SetStatSpeed(on, target)
 }
 
 export async function isCapturing(): Promise<boolean> {

@@ -193,6 +193,8 @@ type Engine struct {
 	maskDodge     uint32            // skill_id written over masked casts (a no-VFX Dodge id)
 	animMaskOn    bool              // "disable skill anims except mine": rewrite non-edit-list, non-own casts
 	animMaskID    uint32            // skill_id written over anim-masked casts (a tiny no-anim skill)
+	statSpeedOn     bool            // EXPERIMENT: overwrite combat-speed stat (0x011a) in inbound stat-recalc packets
+	statSpeedTarget uint32          // target value for stat 0x011a; multiplier = (10000+target)/10000
 	casterFilter  uint64            // engine-level caster filter: only this caster is processed; 0 = all
 	actorNames    map[uint64]string // learned actor_id -> character name (for the caster picker)
 	actLog        []uint64          // distinct configured-skill ACT casters seen this session (picker options)
@@ -368,6 +370,30 @@ func (e *Engine) SetAnimMask(on bool, replaceID uint32) {
 		e.emitLog(fmt.Sprintf("Skill-anim mask ON — others' non-edit-list casts -> skill %d (your casts + edit-list kept; lock your caster first)", id))
 	case !on && was:
 		e.emitLog("Skill-anim mask OFF")
+	}
+}
+
+// SetStatSpeed toggles an EXPERIMENT: overwrite the combat-speed stat (id 0x011a)
+// inside inbound stat-recalc packets (the LZ4 bundle the server sends on
+// equip/zone/login). Combat-speed multiplier = (10000+stat)/10000, so
+// target=20000 → 3.0x. The edit patches the LZ4 block literals in place
+// (length-preserving, no TCP resync); a value stored as an LZ4 back-reference is
+// left untouched (logged). The server is authoritative, so this tests whether the
+// client honours a modified resting combat-speed (movement + all-skill animation
+// rate), which the per-cast speed edit does not reach. target==0 keeps the
+// current target.
+func (e *Engine) SetStatSpeed(on bool, target uint32) {
+	e.mu.Lock()
+	e.statSpeedOn = on
+	if target != 0 {
+		e.statSpeedTarget = target
+	}
+	t := e.statSpeedTarget
+	e.mu.Unlock()
+	if on {
+		e.emitLog(fmt.Sprintf("Stat-speed edit ON — combat-speed stat 0x011a -> %d (%.4fx) on equip/zone", t, float64(10000+t)/10000))
+	} else {
+		e.emitLog("Stat-speed edit OFF")
 	}
 }
 
@@ -1101,6 +1127,72 @@ func (e *Engine) editCompressedCasts(
 	return handled, edited
 }
 
+// findCombatSpeedStat locates the combat-speed stat (id 0x011a) inside a
+// decompressed stat-recalc table — a contiguous run of <id u16 LE><value i32 LE>
+// records with ids in 0x0100..0x01ff. Returns the offset of the 4 value bytes,
+// or -1. Verified against a live equip/unequip capture: stat 0x011a is the
+// combat-speed bonus, and the combat-speed multiplier = (10000+value)/10000
+// (matches the per-cast speed field exactly).
+func findCombatSpeedStat(d []byte) int {
+	const target = 0x011a
+	for i := 0; i+12 <= len(d); i++ {
+		if uint16(d[i])|uint16(d[i+1])<<8 != target {
+			continue
+		}
+		// Guard against a coincidental "1a 01": the following 6-byte record's id
+		// must also be a 0x01xx stat, i.e. we're really inside the stat table.
+		if nextID := uint16(d[i+6]) | uint16(d[i+7])<<8; nextID < 0x0100 || nextID > 0x01ff {
+			continue
+		}
+		if v := int32(binary.LittleEndian.Uint32(d[i+2 : i+6])); v > 0 && v < 1_000_000 {
+			return i + 2
+		}
+	}
+	return -1
+}
+
+// editStatSpeed overwrites the combat-speed stat (0x011a) in an inbound
+// LZ4-compressed stat-recalc packet with target, patching the block literals in
+// place (length-preserving, so the TCP segment stays in sync — no seq/ack
+// rewrite). handled=true when the payload was an LZ4 frame; edited=true when a
+// byte was changed. A value stored as an LZ4 back-reference is unreachable and
+// left as-is (logged). Mirrors editCompressedCasts' literal-patch approach.
+func (e *Engine) editStatSpeed(raw, payload []byte, payloadOffset int, target uint32) (handled, edited bool) {
+	blockStart, origLen, ok := parseLZ4Frame(payload)
+	if !ok {
+		return false, false
+	}
+	handled = true
+	clean, litSrc, dok := lz4DecompressTrace(payload[blockStart:], origLen)
+	if !dok {
+		return handled, false
+	}
+	off := findCombatSpeedStat(clean)
+	if off < 0 {
+		return handled, false
+	}
+	blk := make([]int, 4)
+	for k := 0; k < 4; k++ {
+		if off+k >= len(litSrc) || litSrc[off+k] < 0 {
+			e.emitLog("Stat-speed: stat 0x011a is an LZ4 back-ref this packet (unreachable) — skipped")
+			return handled, false
+		}
+		blk[k] = litSrc[off+k]
+	}
+	old := binary.LittleEndian.Uint32(clean[off : off+4])
+	if old == target {
+		return handled, false
+	}
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], target)
+	for k := 0; k < 4; k++ {
+		raw[payloadOffset+blockStart+blk[k]] = b[k]
+	}
+	e.countModify()
+	e.emitLog(fmt.Sprintf("Stat-speed: combat-speed 0x011a %d -> %d (%.4fx)", old, target, float64(10000+target)/10000))
+	return handled, true
+}
+
 func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	modified := false
 	defer func() {
@@ -1138,6 +1230,8 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	animMaskOn := e.animMaskOn
 	animMaskID := e.animMaskID
 	casterFilter := e.casterFilter
+	statSpeedOn := e.statSpeedOn
+	statSpeedTarget := e.statSpeedTarget
 	sessionCh := e.sessionCh
 	e.mu.Unlock()
 
@@ -1241,6 +1335,15 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	// patch the block literals in place (length-preserving). Skip the mask path
 	// (it edits other casters' ids and still uses the legacy route).
 	filtering := e.tracker.isConfigured()
+	// EXPERIMENT: overwrite the combat-speed stat (0x011a) in the server's
+	// LZ4 stat-recalc bundle (equip/zone). Runs before the cast editor since that
+	// returns on any LZ4 frame; the stat packet carries no casts so the two don't
+	// collide. Independent of maskOn.
+	if statSpeedOn {
+		if _, ed := e.editStatSpeed(raw, payload, payloadOffset, statSpeedTarget); ed {
+			modified = true
+		}
+	}
 	if lz4DecompressEdit && !maskOn {
 		if handled, ed := e.editCompressedCasts(raw, payload, payloadOffset,
 			scanIDs, scanFB, lookup, idToName, casterFilter, filtering, autoMode, autoBase, autoPerMs,

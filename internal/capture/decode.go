@@ -20,6 +20,7 @@ package capture
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -405,6 +406,24 @@ func critStr(typ uint64) string {
 	return fmt.Sprintf("%d", typ)
 }
 
+// scalarHint renders a 4- or 8-byte little-endian range as candidate numeric
+// interpretations (unsigned int + IEEE float). Used to hunt for a buff magnitude
+// — e.g. an attack-speed / TimeDilation multiplier — hiding in bytes that DPS
+// meters treat as opaque padding.
+func scalarHint(d []byte, off, n int) string {
+	switch n {
+	case 4:
+		if v, ok := u32le(d, off); ok {
+			return fmt.Sprintf("u32=%d f32=%g", v, math.Float32frombits(v))
+		}
+	case 8:
+		if v, ok := u64le(d, off); ok {
+			return fmt.Sprintf("u64=%d f64=%g", v, math.Float64frombits(v))
+		}
+	}
+	return ""
+}
+
 func orNone(s string) string {
 	if s = strings.TrimSpace(s); s == "" {
 		return "none"
@@ -509,10 +528,16 @@ func decodeBuff(msg []byte, body int, names map[uint32]string) string {
 	target, n := parseVarint(msg, off)
 	a.f("target", off, n, fmt.Sprintf("%d", target))
 	off += n
-	a.f("pad", off, 2, "")
+	// pad + skip are opaque in DPS meters; surface them as numbers — a buff
+	// magnitude could ride in either slot.
+	if pad, ok := u16le(msg, off); ok {
+		a.f("pad", off, 2, fmt.Sprintf("u16=%d", pad))
+	} else {
+		a.f("pad", off, 2, "")
+	}
 	off += 2
-	_, sn := parseVarint(msg, off)
-	a.f("skip", off, sn, "")
+	sv, sn := parseVarint(msg, off)
+	a.f("skip", off, sn, fmt.Sprintf("%d", sv))
 	off += sn
 	skill, ok := u32le(msg, off)
 	if !ok {
@@ -528,8 +553,13 @@ func decodeBuff(msg []byte, body int, names map[uint32]string) string {
 	if dur == 0xFFFFFFFF {
 		durStr = "permanent"
 	}
-	a.f("duration", off, 8, durStr) // 4-byte value + 4 pad
-	off += 8
+	a.f("duration", off, 4, durStr)
+	off += 4
+	// The 4 bytes after duration were folded into padding by DPS meters (which
+	// only need code+duration). A per-buff magnitude (attack-speed/TimeDilation
+	// multiplier) is the prime suspect here — show u32 + float32.
+	a.f("durX", off, 4, scalarHint(msg, off, 4))
+	off += 4
 	if st, ok := u64le(msg, off); ok {
 		a.f("serverTime", off, 8, fmt.Sprintf("%d", st))
 		off += 8
