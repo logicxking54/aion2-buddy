@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,12 +25,119 @@ import (
 // skill-cast VFX disabled) into the game's Content\Paks folder. The pak is too
 // big to embed, so it's downloaded once from a static host, checksum-verified,
 // cached, and copied in. It's strictly gated to the exact game build it was made
-// for — a game patch can change the cooked assets and invalidate it.
+// for — a game patch can rewrite the cooked FX assets (build 84 did), and an
+// override pak carrying the previous build's assets would mask the new ones.
+//
+// Which pak serves which game build lives in a remote manifest, not in this
+// binary: a game patch then needs a re-cook + upload + a one-line manifest edit,
+// with no app release. The baked-in constants below are only a fallback for when
+// the manifest can't be fetched (offline, host down).
+// var, not const, so tests can point it at a local server.
+var skillEffectManifestURL = "https://static.logicxking.com/skilleffect-manifest.json"
+
+// All three MUST describe the same pak — a version that doesn't match the URL/SHA
+// would hand an older build's assets to a newer client and mask the FX the patch
+// rewrote. Bump them together whenever a new pak is cooked.
 const (
-	skillEffectVersion = "83" // exact game build (VersionInfo <Version>) this targets
-	skillEffectURL     = "https://static.logicxking.com/cbdfe48d-00ea-4fd7-906d-9a585a607ac6.zip"
-	skillEffectSHA256  = "34b07741a581b168b660ca4909639b6a3de4f68235f139000454ffbd773c3d43"
+	fallbackSkillEffectVersion = "84" // game build (VersionInfo <Version>) the fallback pak targets
+	fallbackSkillEffectURL     = "https://static.logicxking.com/4ff9745b-0bbc-44c0-a5a1-443c6380b61d.zip"
+	fallbackSkillEffectSHA256  = "7a32f6489f6100b01a7bda34ce13f979398f4fb8568987a6ad709b1df9297907"
 )
+
+// skillEffectRelease is one cooked pak: which zip to fetch and what it must hash to.
+type skillEffectRelease struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
+	SizeMB int    `json:"sizeMB"`
+}
+
+// skillEffectManifest maps game build number ("84") -> the pak cooked for it.
+// Keeping several builds lets users who haven't patched yet still get their match.
+type skillEffectManifest struct {
+	Builds map[string]skillEffectRelease `json:"builds"`
+}
+
+var (
+	manifestMu     sync.Mutex
+	manifestCached *skillEffectManifest // nil until a fetch succeeds
+)
+
+// fetchManifest returns the remote manifest, or nil if it can't be reached. A
+// successful fetch is cached for the process; failures are not, so a transient
+// network blip doesn't pin us to the fallback for the whole session.
+func fetchManifest(log Logger) *skillEffectManifest {
+	manifestMu.Lock()
+	defer manifestMu.Unlock()
+	if manifestCached != nil {
+		return manifestCached
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(skillEffectManifestURL)
+	if err != nil {
+		log.log("Skill-effect mod: manifest unreachable (%v) — using built-in list", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.log("Skill-effect mod: manifest returned %s — using built-in list", resp.Status)
+		return nil
+	}
+
+	var m skillEffectManifest
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m); err != nil {
+		log.log("Skill-effect mod: manifest unreadable (%v) — using built-in list", err)
+		return nil
+	}
+	if len(m.Builds) == 0 {
+		log.log("Skill-effect mod: manifest listed no builds — using built-in list")
+		return nil
+	}
+	manifestCached = &m
+	return manifestCached
+}
+
+// releaseFor resolves the pak to use for a given game build, or nil if that build
+// isn't supported. The manifest is authoritative when reachable; otherwise we can
+// only serve the one build baked into this binary.
+func releaseFor(build string, log Logger) *skillEffectRelease {
+	if build == "" {
+		return nil
+	}
+	if m := fetchManifest(log); m != nil {
+		r, ok := m.Builds[build]
+		if !ok || r.URL == "" || r.SHA256 == "" {
+			return nil
+		}
+		return &r
+	}
+	if build == fallbackSkillEffectVersion {
+		return &skillEffectRelease{URL: fallbackSkillEffectURL, SHA256: fallbackSkillEffectSHA256, SizeMB: 69}
+	}
+	return nil
+}
+
+// supportedBuilds lists the game builds we have a pak for, newest first — shown to
+// the user when their build isn't one of them.
+func supportedBuilds(log Logger) string {
+	m := fetchManifest(log)
+	if m == nil {
+		return fallbackSkillEffectVersion
+	}
+	builds := make([]string, 0, len(m.Builds))
+	for b := range m.Builds {
+		builds = append(builds, b)
+	}
+	sort.Slice(builds, func(i, j int) bool {
+		ni, erri := strconv.Atoi(builds[i])
+		nj, errj := strconv.Atoi(builds[j])
+		if erri == nil && errj == nil {
+			return ni > nj
+		}
+		return builds[i] > builds[j]
+	})
+	return strings.Join(builds, ", ")
+}
 
 // The override pak MUST use patch index ≥1 (_1_P) so it outranks the base game's
 // pakchunkN-Windows_0_P content across ALL chunks; a high chunk number (99999) is
@@ -169,16 +280,18 @@ func skillEffectInstalled(paksDir string) bool {
 // SkillEffectStatus reports where the game is, whether the mod is installed, and
 // whether it's compatible with the installed build.
 func SkillEffectStatus() SkillEffectInfo {
-	info := SkillEffectInfo{Supported: skillEffectVersion}
+	var info SkillEffectInfo
 	paks := DetectPaksDir()
 	if paks == "" {
+		info.Supported = supportedBuilds(nil)
 		return info
 	}
 	info.Found = true
 	info.PaksDir = paks
 	info.Applied = skillEffectInstalled(paks)
 	info.GameVersion = gameVersion(paks)
-	info.Compatible = info.GameVersion == skillEffectVersion
+	info.Supported = supportedBuilds(nil)
+	info.Compatible = releaseFor(info.GameVersion, nil) != nil
 	return info
 }
 
@@ -194,7 +307,7 @@ func skillEffectCacheDir() (string, error) {
 
 // ensureSkillEffectCache makes sure the extracted pak files are in the cache,
 // downloading + checksum-verifying + extracting the zip on first use.
-func ensureSkillEffectCache(log Logger, progress ProgressFunc) (string, error) {
+func ensureSkillEffectCache(rel *skillEffectRelease, log Logger, progress ProgressFunc) (string, error) {
 	cache, err := skillEffectCacheDir()
 	if err != nil {
 		return "", err
@@ -216,7 +329,7 @@ func ensureSkillEffectCache(log Logger, progress ProgressFunc) (string, error) {
 		}
 	}
 	if have {
-		if b, _ := os.ReadFile(marker); strings.TrimSpace(string(b)) != skillEffectSHA256 {
+		if b, _ := os.ReadFile(marker); strings.TrimSpace(string(b)) != rel.SHA256 {
 			have = false // cache is for a different build — rebuild it
 		}
 	}
@@ -228,21 +341,25 @@ func ensureSkillEffectCache(log Logger, progress ProgressFunc) (string, error) {
 	zipPath := filepath.Join(cache, "skilleffect.zip")
 	needDownload := true
 	if fileExists(zipPath) {
-		if sum, _ := sha256File(zipPath); sum == skillEffectSHA256 {
+		if sum, _ := sha256File(zipPath); sum == rel.SHA256 {
 			needDownload = false
 			log.log("Skill-effect mod: cached download already verified")
 		}
 	}
 	if needDownload {
-		log.log("Skill-effect mod: downloading ~69 MB…")
-		if err := downloadFile(skillEffectURL, zipPath, log, progress); err != nil {
+		size := rel.SizeMB
+		if size == 0 {
+			size = 69
+		}
+		log.log("Skill-effect mod: downloading ~%d MB…", size)
+		if err := downloadFile(rel.URL, zipPath, log, progress); err != nil {
 			return "", fmt.Errorf("download failed: %w", err)
 		}
 		sum, err := sha256File(zipPath)
 		if err != nil {
 			return "", err
 		}
-		if sum != skillEffectSHA256 {
+		if sum != rel.SHA256 {
 			_ = os.Remove(zipPath)
 			return "", fmt.Errorf("download corrupted (checksum mismatch): got %s", sum)
 		}
@@ -252,7 +369,7 @@ func ensureSkillEffectCache(log Logger, progress ProgressFunc) (string, error) {
 	if err := extractNamed(zipPath, cache, skillEffectPakNames, log); err != nil {
 		return "", fmt.Errorf("extract failed: %w", err)
 	}
-	_ = os.WriteFile(marker, []byte(skillEffectSHA256), 0o644)
+	_ = os.WriteFile(marker, []byte(rel.SHA256), 0o644)
 	return cache, nil
 }
 
@@ -263,10 +380,11 @@ func ApplySkillEffect(log Logger, progress ProgressFunc) (SkillEffectInfo, error
 	if !info.Found {
 		return info, errors.New("could not find the Aion 2 Paks folder — make sure the game is installed")
 	}
-	if !info.Compatible {
-		return info, fmt.Errorf("this mod is built for game version %s, but the installed game is version %q", skillEffectVersion, info.GameVersion)
+	rel := releaseFor(info.GameVersion, log)
+	if rel == nil {
+		return info, fmt.Errorf("no pak has been built for game version %q yet (available: %s)", info.GameVersion, supportedBuilds(log))
 	}
-	cache, err := ensureSkillEffectCache(log, progress)
+	cache, err := ensureSkillEffectCache(rel, log, progress)
 	if err != nil {
 		return info, err
 	}

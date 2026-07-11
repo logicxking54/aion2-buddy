@@ -1,0 +1,14 @@
+{
+  "builds": {
+    "84": {
+      "url": "https://static.logicxking.com/4ff9745b-0bbc-44c0-a5a1-443c6380b61d.zip",
+      "sha256": "7a32f6489f6100b01a7bda34ce13f979398f4fb8568987a6ad709b1df9297907",
+      "sizeMB": 69
+    },
+    "83": {
+      "url": "https://static.logicxking.com/cbdfe48d-00ea-4fd7-906d-9a585a607ac6.zip",
+      "sha256": "34b07741a581b168b660ca4909639b6a3de4f68235f139000454ffbd773c3d43",
+      "sizeMB": 69
+    }
+  }
+}

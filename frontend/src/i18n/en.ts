@@ -43,7 +43,7 @@ export default {
     skillfxTitle: 'Disable Skill Effects',
     skillfxDesc: "Removes every class's skill cast visual effects (all players, on your screen) for higher FPS and a clearer view. Animation, damage and gameplay are untouched. Restart the game to apply.",
     skillfxNote: 'Downloads ~69 MB on first enable · fully reversible',
-    skillfxIncompatible: "Built for game v{supported}, but the game is v{game} — can't enable. Update the app after a game patch.",
+    skillfxIncompatible: "No pak built for game v{game} yet (available: v{supported}) — can't enable. One is usually published soon after a game patch; no app update needed.",
     skillfxDownloading: 'Downloading mod… {pct}%',
   },
   settings: {

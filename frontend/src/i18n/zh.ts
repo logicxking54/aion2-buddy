@@ -43,7 +43,7 @@ export default {
     skillfxTitle: '關閉技能特效',
     skillfxDesc: '移除所有職業的技能施放視覺特效（畫面上所有玩家）以提升 FPS 並讓畫面更清晰。動作、傷害與遊戲玩法不受影響。需重新啟動遊戲才會生效。',
     skillfxNote: '首次開啟時下載約 69 MB · 可完全還原',
-    skillfxIncompatible: '此模組為遊戲 v{supported} 製作，但目前遊戲為 v{game} — 無法開啟。遊戲更新後請更新此應用程式。',
+    skillfxIncompatible: '尚未有對應遊戲 v{game} 的模組檔（現有：v{supported}）— 無法開啟。遊戲更新後通常很快就會發布，且無需更新此應用程式。',
     skillfxDownloading: '正在下載模組… {pct}%',
   },
   settings: {
