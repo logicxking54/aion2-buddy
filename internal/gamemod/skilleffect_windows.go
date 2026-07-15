@@ -98,18 +98,22 @@ func fetchManifest(log Logger) *skillEffectManifest {
 }
 
 // releaseFor resolves the pak to use for a given game build, or nil if that build
-// isn't supported. The manifest is authoritative when reachable; otherwise we can
-// only serve the one build baked into this binary.
+// isn't supported. The manifest is authoritative when it lists the build; otherwise
+// the app falls back to the single build baked into this binary. Because our static
+// host has no fixed-name URL the upload API can overwrite (it assigns random names),
+// the live manifest can lag behind a just-shipped build — so the baked fallback must
+// answer even when the manifest is reachable but hasn't been updated yet. This is
+// safe: the fallback only ever serves the exact build it was cooked for, never a
+// mismatched pak.
 func releaseFor(build string, log Logger) *skillEffectRelease {
 	if build == "" {
 		return nil
 	}
 	if m := fetchManifest(log); m != nil {
-		r, ok := m.Builds[build]
-		if !ok || r.URL == "" || r.SHA256 == "" {
-			return nil
+		if r, ok := m.Builds[build]; ok && r.URL != "" && r.SHA256 != "" {
+			return &r
 		}
-		return &r
+		// Reachable but missing this build — fall through to the baked fallback.
 	}
 	if build == fallbackSkillEffectVersion {
 		return &skillEffectRelease{URL: fallbackSkillEffectURL, SHA256: fallbackSkillEffectSHA256, SizeMB: 69}
@@ -118,14 +122,17 @@ func releaseFor(build string, log Logger) *skillEffectRelease {
 }
 
 // supportedBuilds lists the game builds we have a pak for, newest first — shown to
-// the user when their build isn't one of them.
+// the user when their build isn't one of them. Includes the baked fallback build,
+// which releaseFor can serve even if the live manifest hasn't listed it yet.
 func supportedBuilds(log Logger) string {
-	m := fetchManifest(log)
-	if m == nil {
-		return fallbackSkillEffectVersion
+	set := map[string]bool{fallbackSkillEffectVersion: true}
+	if m := fetchManifest(log); m != nil {
+		for b := range m.Builds {
+			set[b] = true
+		}
 	}
-	builds := make([]string, 0, len(m.Builds))
-	for b := range m.Builds {
+	builds := make([]string, 0, len(set))
+	for b := range set {
 		builds = append(builds, b)
 	}
 	sort.Slice(builds, func(i, j int) bool {

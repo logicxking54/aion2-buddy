@@ -43,13 +43,39 @@ func TestReleaseForUsesManifest(t *testing.T) {
 	if rel := releaseFor("83", nil); rel == nil || rel.SHA256 != "bb83" {
 		t.Fatalf("build 83 should resolve to its own pak, got %+v", rel)
 	}
-	// A build the manifest doesn't list must NOT silently fall back to another
-	// build's pak — that would mask the FX assets the patch rewrote.
-	if rel := releaseFor("85", nil); rel != nil {
-		t.Fatalf("unlisted build 85 should be unsupported, got %+v", rel)
+	// A build the manifest doesn't list, and that isn't the baked fallback, must NOT
+	// silently resolve to another build's pak — that would mask the FX the patch
+	// rewrote. (Use a build far from fallbackSkillEffectVersion.)
+	if rel := releaseFor("99999", nil); rel != nil {
+		t.Fatalf("unlisted non-fallback build should be unsupported, got %+v", rel)
 	}
-	if got := supportedBuilds(nil); got != "84, 83" {
-		t.Fatalf("supportedBuilds should be newest-first, got %q", got)
+	// supportedBuilds unions the manifest with the baked fallback, newest-first.
+	if got := supportedBuilds(nil); got != "84, 83" && got != "85, 84, 83" {
+		t.Fatalf("unexpected supportedBuilds: %q", got)
+	}
+}
+
+// A build the live manifest hasn't caught up to yet must still resolve — via the
+// baked fallback — as long as it's the exact build the fallback was cooked for.
+// This is the case that matters when the fixed-name manifest can't be overwritten.
+func TestReleaseForFallsBackWhenManifestStale(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Manifest is reachable but lists only OLD builds, not the fallback's.
+		w.Write([]byte(`{"builds":{"1":{"url":"https://example.com/old.zip","sha256":"old"}}}`))
+	}))
+	defer srv.Close()
+	resetManifestCache(t, srv.URL)
+
+	rel := releaseFor(fallbackSkillEffectVersion, nil)
+	if rel == nil {
+		t.Fatal("the baked build must resolve even when the live manifest omits it")
+	}
+	if rel.URL != fallbackSkillEffectURL || rel.SHA256 != fallbackSkillEffectSHA256 {
+		t.Fatalf("stale-manifest fallback must match baked constants: %+v", rel)
+	}
+	// But a different unlisted build still gets nothing.
+	if rel := releaseFor("2", nil); rel != nil {
+		t.Fatalf("unlisted non-fallback build should stay unsupported, got %+v", rel)
 	}
 }
 
