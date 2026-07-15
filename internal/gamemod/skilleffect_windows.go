@@ -39,9 +39,9 @@ var skillEffectManifestURL = "https://static.logicxking.com/skilleffect-manifest
 // would hand an older build's assets to a newer client and mask the FX the patch
 // rewrote. Bump them together whenever a new pak is cooked.
 const (
-	fallbackSkillEffectVersion = "84" // game build (VersionInfo <Version>) the fallback pak targets
-	fallbackSkillEffectURL     = "https://static.logicxking.com/4ff9745b-0bbc-44c0-a5a1-443c6380b61d.zip"
-	fallbackSkillEffectSHA256  = "7a32f6489f6100b01a7bda34ce13f979398f4fb8568987a6ad709b1df9297907"
+	fallbackSkillEffectVersion = "85" // game build (VersionInfo <Version>) the fallback pak targets
+	fallbackSkillEffectURL     = "https://static.logicxking.com/3db28081-dc3a-4ee1-8808-ce2220539fbd.zip"
+	fallbackSkillEffectSHA256  = "c17c4c8b45ff55403f40a44a4a0be492b49739243c03faf1ffe0e956725cee90"
 )
 
 // skillEffectRelease is one cooked pak: which zip to fetch and what it must hash to.
