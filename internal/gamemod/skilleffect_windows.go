@@ -29,10 +29,10 @@ import (
 // override pak carrying the previous build's assets would mask the new ones.
 //
 // Which pak serves which game build is looked up in a remote manifest first, so a
-// game patch can be covered by editing that JSON with no app release. In practice
-// the manifest host has no fixed-name URL our upload API can overwrite, so the
-// baked-in table below is what usually ships a new build — the manifest stays as
-// the mechanism that could retire app releases once the fixed file is writable.
+// game patch is covered by editing that JSON server-side with no app release (see
+// tools/effect-mod/README.md for how it's published). The baked-in table below is
+// the offline fallback, and only needs a new entry when we happen to be cutting a
+// release anyway — the manifest is what actually ships a build to users.
 // var, not const, so tests can point it at a local server.
 var skillEffectManifestURL = "https://static.logicxking.com/skilleffect-manifest.json"
 
@@ -54,8 +54,9 @@ type skillEffectRelease struct {
 // builds may share one zip only when their extracted FX are byte-identical —
 // verify with the hash-diff in tools/effect-mod/README.md, never assume.
 var fallbackBuilds = map[string]skillEffectRelease{
-	// 86's FX are byte-identical to 85's (verified: 0 new / 0 removed / 0 changed),
-	// so both are served by the pak cooked from build 85.
+	// 86 and 87 left player FX byte-identical to 85 (verified each time: 0 new /
+	// 0 removed / 0 changed), so all three are served by the pak cooked from 85.
+	"87": {URL: "https://static.logicxking.com/3db28081-dc3a-4ee1-8808-ce2220539fbd.zip", SHA256: "c17c4c8b45ff55403f40a44a4a0be492b49739243c03faf1ffe0e956725cee90", SizeMB: 65},
 	"86": {URL: "https://static.logicxking.com/3db28081-dc3a-4ee1-8808-ce2220539fbd.zip", SHA256: "c17c4c8b45ff55403f40a44a4a0be492b49739243c03faf1ffe0e956725cee90", SizeMB: 65},
 	"85": {URL: "https://static.logicxking.com/3db28081-dc3a-4ee1-8808-ce2220539fbd.zip", SHA256: "c17c4c8b45ff55403f40a44a4a0be492b49739243c03faf1ffe0e956725cee90", SizeMB: 65},
 	"84": {URL: "https://static.logicxking.com/4ff9745b-0bbc-44c0-a5a1-443c6380b61d.zip", SHA256: "7a32f6489f6100b01a7bda34ce13f979398f4fb8568987a6ad709b1df9297907", SizeMB: 69},

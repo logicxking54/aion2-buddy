@@ -55,19 +55,38 @@ retoc.exe to-zen --version UE5_3 C:/aion_fx/vNN_slim \
 
 ## Publishing (no app release needed)
 
-1. Upload the zip → get its URL.
-2. Add an entry to `skilleffect-manifest.json` (newest build first) with the URL, the
-   zip's `sha256`, and its size in MB. Keep the previous build's entry — users who
-   haven't patched yet still need it.
-3. Upload the manifest to `https://static.logicxking.com/skilleffect-manifest.json`.
+The static host is a box we have root on. Files served at `static.logicxking.com/<name>`
+live in `/root/core/static/storage/` on `167.172.74.106` (ssh key `~/.ssh/me`).
 
-The app reads that manifest at runtime and picks the pak matching the player's build.
-A build with no entry is reported as unsupported — it never falls back to another
+The public upload API (`POST chatnklaos-api.logicxking.com/public/upload`, field `file`)
+renames every upload to a random UUID — fine for pak zips, useless for the manifest,
+which must keep its exact name. So: **upload zips via the API, edit the manifest over ssh.**
+
+1. Upload the zip (only if the FX actually changed — step 3 above tells you):
+   ```bash
+   curl.exe -X POST "https://chatnklaos-api.logicxking.com/public/upload" -F "file=@C:\aion_fx\skilleffect-vNN.zip"
+   # response: {"url":"https://static.xname2.com/<uuid>.zip"}
+   # xname2.com is an expired domain for the same storage — rewrite it to logicxking.com
+   ```
+2. Add an entry to `skilleffect-manifest.json` (newest build first): the rewritten URL,
+   the zip's sha256, size in MB. **Keep older builds** — players who haven't patched
+   still need their match. If the FX were unchanged, point the new build at the existing
+   zip rather than cooking a new one.
+3. Publish it:
+   ```bash
+   scp -i ~/.ssh/me tools/effect-mod/skilleffect-manifest.json \
+     root@167.172.74.106:/root/core/static/storage/skilleffect-manifest.json
+   curl -s https://static.logicxking.com/skilleffect-manifest.json   # verify
+   ```
+
+The app reads that manifest at runtime and picks the pak matching the player's build,
+so a new build reaches everyone with no app update. A build listed in neither the
+manifest nor the baked table is reported unsupported — it never falls back to another
 build's pak.
 
 ### The baked-in fallback
 
-`internal/gamemod/skilleffect_windows.go` also carries `fallbackSkillEffectVersion` /
-`URL` / `SHA256` — used only when the manifest host is unreachable. **All three must
-describe the same pak.** They only need bumping if you want offline users to get a
-newer build; the manifest is what normally drives everything.
+`internal/gamemod/skilleffect_windows.go` carries `fallbackBuilds`, a build → pak table
+used only when the manifest doesn't list a build (stale or host down). Add the new build
+there too if you're cutting a release anyway, but it is **not** a reason to release —
+publishing the manifest is what ships a build.
