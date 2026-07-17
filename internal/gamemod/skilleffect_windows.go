@@ -28,27 +28,38 @@ import (
 // for — a game patch can rewrite the cooked FX assets (build 84 did), and an
 // override pak carrying the previous build's assets would mask the new ones.
 //
-// Which pak serves which game build lives in a remote manifest, not in this
-// binary: a game patch then needs a re-cook + upload + a one-line manifest edit,
-// with no app release. The baked-in constants below are only a fallback for when
-// the manifest can't be fetched (offline, host down).
+// Which pak serves which game build is looked up in a remote manifest first, so a
+// game patch can be covered by editing that JSON with no app release. In practice
+// the manifest host has no fixed-name URL our upload API can overwrite, so the
+// baked-in table below is what usually ships a new build — the manifest stays as
+// the mechanism that could retire app releases once the fixed file is writable.
 // var, not const, so tests can point it at a local server.
 var skillEffectManifestURL = "https://static.logicxking.com/skilleffect-manifest.json"
-
-// All three MUST describe the same pak — a version that doesn't match the URL/SHA
-// would hand an older build's assets to a newer client and mask the FX the patch
-// rewrote. Bump them together whenever a new pak is cooked.
-const (
-	fallbackSkillEffectVersion = "85" // game build (VersionInfo <Version>) the fallback pak targets
-	fallbackSkillEffectURL     = "https://static.logicxking.com/3db28081-dc3a-4ee1-8808-ce2220539fbd.zip"
-	fallbackSkillEffectSHA256  = "c17c4c8b45ff55403f40a44a4a0be492b49739243c03faf1ffe0e956725cee90"
-)
 
 // skillEffectRelease is one cooked pak: which zip to fetch and what it must hash to.
 type skillEffectRelease struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
 	SizeMB int    `json:"sizeMB"`
+}
+
+// fallbackBuilds maps game build -> the pak cooked for it, baked into the binary.
+// Mirrors the manifest's shape, and is consulted whenever the manifest doesn't
+// list a build (including when it's stale or unreachable).
+//
+// Keep older builds listed: a player who hasn't patched yet still needs their
+// match, and dropping an entry silently makes the mod unavailable for them.
+//
+// Each entry's URL/SHA256 MUST be the pak cooked from that build's own FX. Two
+// builds may share one zip only when their extracted FX are byte-identical —
+// verify with the hash-diff in tools/effect-mod/README.md, never assume.
+var fallbackBuilds = map[string]skillEffectRelease{
+	// 86's FX are byte-identical to 85's (verified: 0 new / 0 removed / 0 changed),
+	// so both are served by the pak cooked from build 85.
+	"86": {URL: "https://static.logicxking.com/3db28081-dc3a-4ee1-8808-ce2220539fbd.zip", SHA256: "c17c4c8b45ff55403f40a44a4a0be492b49739243c03faf1ffe0e956725cee90", SizeMB: 65},
+	"85": {URL: "https://static.logicxking.com/3db28081-dc3a-4ee1-8808-ce2220539fbd.zip", SHA256: "c17c4c8b45ff55403f40a44a4a0be492b49739243c03faf1ffe0e956725cee90", SizeMB: 65},
+	"84": {URL: "https://static.logicxking.com/4ff9745b-0bbc-44c0-a5a1-443c6380b61d.zip", SHA256: "7a32f6489f6100b01a7bda34ce13f979398f4fb8568987a6ad709b1df9297907", SizeMB: 69},
+	"83": {URL: "https://static.logicxking.com/cbdfe48d-00ea-4fd7-906d-9a585a607ac6.zip", SHA256: "34b07741a581b168b660ca4909639b6a3de4f68235f139000454ffbd773c3d43", SizeMB: 69},
 }
 
 // skillEffectManifest maps game build number ("84") -> the pak cooked for it.
@@ -98,13 +109,9 @@ func fetchManifest(log Logger) *skillEffectManifest {
 }
 
 // releaseFor resolves the pak to use for a given game build, or nil if that build
-// isn't supported. The manifest is authoritative when it lists the build; otherwise
-// the app falls back to the single build baked into this binary. Because our static
-// host has no fixed-name URL the upload API can overwrite (it assigns random names),
-// the live manifest can lag behind a just-shipped build — so the baked fallback must
-// answer even when the manifest is reachable but hasn't been updated yet. This is
-// safe: the fallback only ever serves the exact build it was cooked for, never a
-// mismatched pak.
+// isn't supported. The manifest wins when it lists the build (that's how a build can
+// be added without an app release); otherwise the baked table answers. Both are
+// keyed by exact build, so neither path can serve another build's pak.
 func releaseFor(build string, log Logger) *skillEffectRelease {
 	if build == "" {
 		return nil
@@ -113,19 +120,22 @@ func releaseFor(build string, log Logger) *skillEffectRelease {
 		if r, ok := m.Builds[build]; ok && r.URL != "" && r.SHA256 != "" {
 			return &r
 		}
-		// Reachable but missing this build — fall through to the baked fallback.
+		// Reachable but missing this build — fall through to the baked table.
 	}
-	if build == fallbackSkillEffectVersion {
-		return &skillEffectRelease{URL: fallbackSkillEffectURL, SHA256: fallbackSkillEffectSHA256, SizeMB: 69}
+	if r, ok := fallbackBuilds[build]; ok {
+		return &r
 	}
 	return nil
 }
 
 // supportedBuilds lists the game builds we have a pak for, newest first — shown to
-// the user when their build isn't one of them. Includes the baked fallback build,
-// which releaseFor can serve even if the live manifest hasn't listed it yet.
+// the user when their build isn't one of them. Unions the baked table with the
+// manifest, matching what releaseFor will actually serve.
 func supportedBuilds(log Logger) string {
-	set := map[string]bool{fallbackSkillEffectVersion: true}
+	set := map[string]bool{}
+	for b := range fallbackBuilds {
+		set[b] = true
+	}
 	if m := fetchManifest(log); m != nil {
 		for b := range m.Builds {
 			set[b] = true

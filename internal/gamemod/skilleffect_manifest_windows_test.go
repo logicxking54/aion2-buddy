@@ -5,6 +5,8 @@ package gamemod
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -43,44 +45,52 @@ func TestReleaseForUsesManifest(t *testing.T) {
 	if rel := releaseFor("83", nil); rel == nil || rel.SHA256 != "bb83" {
 		t.Fatalf("build 83 should resolve to its own pak, got %+v", rel)
 	}
-	// A build the manifest doesn't list, and that isn't the baked fallback, must NOT
-	// silently resolve to another build's pak — that would mask the FX the patch
-	// rewrote. (Use a build far from fallbackSkillEffectVersion.)
+	// A build listed in neither the manifest nor the baked table must NOT silently
+	// resolve to another build's pak — that would mask the FX a patch rewrote.
 	if rel := releaseFor("99999", nil); rel != nil {
-		t.Fatalf("unlisted non-fallback build should be unsupported, got %+v", rel)
+		t.Fatalf("wholly unknown build should be unsupported, got %+v", rel)
 	}
-	// supportedBuilds unions the manifest with the baked fallback, newest-first.
-	if got := supportedBuilds(nil); got != "84, 83" && got != "85, 84, 83" {
-		t.Fatalf("unexpected supportedBuilds: %q", got)
+	// supportedBuilds unions the manifest with the baked table, newest-first.
+	got := supportedBuilds(nil)
+	for _, want := range []string{"84", "83"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("supportedBuilds %q should contain manifest build %s", got, want)
+		}
+	}
+	for b := range fallbackBuilds {
+		if !strings.Contains(got, b) {
+			t.Fatalf("supportedBuilds %q should contain baked build %s", got, b)
+		}
 	}
 }
 
-// A build the live manifest hasn't caught up to yet must still resolve — via the
-// baked fallback — as long as it's the exact build the fallback was cooked for.
-// This is the case that matters when the fixed-name manifest can't be overwritten.
+// A build the live manifest hasn't caught up to must still resolve via the baked
+// table. This is the case that matters in practice: the fixed-name manifest can't
+// be overwritten by our upload API, so it lags every newly cooked build.
 func TestReleaseForFallsBackWhenManifestStale(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Manifest is reachable but lists only OLD builds, not the fallback's.
+		// Reachable, but lists only a build we don't otherwise know about.
 		w.Write([]byte(`{"builds":{"1":{"url":"https://example.com/old.zip","sha256":"old"}}}`))
 	}))
 	defer srv.Close()
 	resetManifestCache(t, srv.URL)
 
-	rel := releaseFor(fallbackSkillEffectVersion, nil)
-	if rel == nil {
-		t.Fatal("the baked build must resolve even when the live manifest omits it")
+	for b, want := range fallbackBuilds {
+		rel := releaseFor(b, nil)
+		if rel == nil {
+			t.Fatalf("baked build %s must resolve even when the manifest omits it", b)
+		}
+		if rel.URL != want.URL || rel.SHA256 != want.SHA256 {
+			t.Fatalf("build %s: stale-manifest fallback must match the baked entry: %+v", b, rel)
+		}
 	}
-	if rel.URL != fallbackSkillEffectURL || rel.SHA256 != fallbackSkillEffectSHA256 {
-		t.Fatalf("stale-manifest fallback must match baked constants: %+v", rel)
-	}
-	// But a different unlisted build still gets nothing.
 	if rel := releaseFor("2", nil); rel != nil {
-		t.Fatalf("unlisted non-fallback build should stay unsupported, got %+v", rel)
+		t.Fatalf("unknown build should stay unsupported, got %+v", rel)
 	}
 }
 
-// When the manifest host is down, the app must still serve the one build baked
-// into the binary — and refuse every other build.
+// When the manifest host is down, the app must still serve every build baked into
+// the binary — and refuse the ones it doesn't know.
 func TestReleaseForFallsBackWhenManifestUnreachable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
@@ -88,25 +98,38 @@ func TestReleaseForFallsBackWhenManifestUnreachable(t *testing.T) {
 	defer srv.Close()
 	resetManifestCache(t, srv.URL)
 
-	rel := releaseFor(fallbackSkillEffectVersion, nil)
-	if rel == nil {
-		t.Fatal("baked-in build should resolve when the manifest is unreachable")
-	}
-	if rel.URL != fallbackSkillEffectURL || rel.SHA256 != fallbackSkillEffectSHA256 {
-		t.Fatalf("fallback release must match the baked-in constants: %+v", rel)
+	for b, want := range fallbackBuilds {
+		rel := releaseFor(b, nil)
+		if rel == nil {
+			t.Fatalf("baked build %s should resolve when the manifest is unreachable", b)
+		}
+		if rel.URL != want.URL || rel.SHA256 != want.SHA256 {
+			t.Fatalf("build %s: fallback must match the baked entry: %+v", b, rel)
+		}
 	}
 	if rel := releaseFor("999", nil); rel != nil {
 		t.Fatalf("non-baked build must be unsupported without a manifest, got %+v", rel)
 	}
 }
 
-// The baked-in fallback triple must be self-consistent: shipping a version that
-// disagrees with its URL/SHA would hand an older build's pak to a newer client.
-func TestFallbackTripleIsConsistent(t *testing.T) {
-	if fallbackSkillEffectVersion == "" || fallbackSkillEffectURL == "" || fallbackSkillEffectSHA256 == "" {
-		t.Fatal("fallback constants must all be set")
+// Every baked entry must be complete: a build pointing at a blank or malformed
+// URL/SHA would fail the download or, worse, skip verification.
+func TestFallbackBuildsAreWellFormed(t *testing.T) {
+	if len(fallbackBuilds) == 0 {
+		t.Fatal("fallbackBuilds must not be empty")
 	}
-	if len(fallbackSkillEffectSHA256) != 64 {
-		t.Fatalf("fallback SHA256 should be 64 hex chars, got %d", len(fallbackSkillEffectSHA256))
+	for b, r := range fallbackBuilds {
+		if _, err := strconv.Atoi(b); err != nil {
+			t.Fatalf("build key %q should be a numeric game build", b)
+		}
+		if !strings.HasPrefix(r.URL, "https://") {
+			t.Fatalf("build %s: URL must be https, got %q", b, r.URL)
+		}
+		if len(r.SHA256) != 64 {
+			t.Fatalf("build %s: SHA256 should be 64 hex chars, got %d", b, len(r.SHA256))
+		}
+		if r.SizeMB <= 0 {
+			t.Fatalf("build %s: SizeMB should be positive, got %d", b, r.SizeMB)
+		}
 	}
 }

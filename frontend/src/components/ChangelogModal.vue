@@ -20,6 +20,12 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.10',
+    changes: [
+      { en: 'Updated "Disable Skill Effects" for game build 86. If you already had it on, re-enable it in the Mod menu after this update — no re-download needed.', th: 'อัปเดต "ปิดเอฟเฟกต์สกิล" ให้รองรับเกมเวอร์ชัน 86 — ถ้าเคยเปิดไว้อยู่แล้ว เปิดใหม่ในเมนู Mod หลังอัปเดตนี้ได้เลย ไม่ต้องโหลดไฟล์ใหม่', zh: '更新「關閉技能特效」以支援遊戲版本 86 — 若先前已開啟，更新後在「模組」選單重新開啟即可，無需重新下載。' },
+    ],
+  },
+  {
     version: '1.2.9',
     changes: [
       { en: 'Updated "Disable Skill Effects" for game build 85. Re-enable it in the Mod menu after this update.', th: 'อัปเดต "ปิดเอฟเฟกต์สกิล" ให้รองรับเกมเวอร์ชัน 85 — เปิดใช้งานใหม่ในเมนู Mod หลังอัปเดตนี้', zh: '更新「關閉技能特效」以支援遊戲版本 85 — 更新後請在「模組」選單重新開啟。' },
