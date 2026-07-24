@@ -197,8 +197,12 @@ type Engine struct {
 	statSpeedTarget uint32          // target value for stat 0x011a; multiplier = (10000+target)/10000
 	casterFilter  uint64            // engine-level caster filter: only this caster is processed; 0 = all
 	actorNames    map[uint64]string // learned actor_id -> character name (for the caster picker)
-	actLog        []uint64          // distinct configured-skill ACT casters seen this session (picker options)
+	actLog        []uint64          // recent configured-skill ACT casters (picker options), oldest first
+	actSeen       map[uint64]int64  // caster -> last configured-skill ACT time (ns), for expiry
 	actSig        string            // signature of the last emitted act-casters list (dedupe)
+	lastOwnReqAt  int64             // ns of the last outbound skill-request-shaped packet (own-cast pairing)
+	ownVotes      map[uint64]int    // caster -> times its ACT followed one of OUR requests
+	ownCaster     uint64            // caster the pairing is confident is us; 0 = undecided
 	running       bool
 
 	stop       chan struct{}
@@ -230,6 +234,8 @@ func NewEngine(emit func(event string, payload any)) *Engine {
 		lastActAt:     map[uint32]int64{},
 		tracker:       newEntityTracker(),
 		actorNames:    map[uint64]string{},
+		actSeen:       map[uint64]int64{},
+		ownVotes:      map[uint64]int{},
 		curPorts:      map[int]struct{}{},
 		lastReqByConn: map[int]int64{},
 		lastReqPkt:    map[int][]byte{},
@@ -409,40 +415,140 @@ func (e *Engine) SetCasterFilter(id uint64) {
 	e.mu.Unlock()
 }
 
-const actLogMax = 20 // max distinct ACT casters kept as picker options
+const (
+	actLogMax = 20 // max distinct ACT casters kept as picker options
+
+	// A caster drops out of the picker once it hasn't cast one of your skills for
+	// this long. Entity keys are re-assigned when you re-enter an instance, so
+	// without expiry the previous run's (now dead) key stays a valid option and the
+	// UI's sticky selection keeps pointing at it. Leaving and re-entering always
+	// takes longer than this, so the stale key is gone by the time you're back in.
+	actCasterTTL = 90 * time.Second
+
+	// Own-cast pairing. Our skill requests go out encrypted, but a request-shaped
+	// packet leaving just before an inbound ACT means that ACT is almost certainly
+	// ours. Delays below the floor are unrelated traffic that happened to be in
+	// flight; above the ceiling the correlation is worthless.
+	ownReqSize     = 28 // outbound payload length of a skill request
+	ownReqMinDelay = 15 * time.Millisecond
+	ownReqMaxDelay = 400 * time.Millisecond
+	// Votes needed before we call a caster "you". One pairing is easy to hit by
+	// chance when a party member casts while our request is in flight; needing
+	// several makes that coincidence have to repeat, which it doesn't.
+	ownVotesNeeded = 3
+	// A decided caster gives up the title after this long without casting. Its
+	// votes would otherwise be a lead the next instance's key has to out-vote from
+	// zero, which is the wrong contest — a key that stopped casting is a key we've
+	// left behind, not a rival. Re-earned in ownVotesNeeded casts if it was just a lull.
+	ownCasterIdle = 30 * time.Second
+)
 
 // actCaster is one recent caster of a configured-skill ACT cast, with its learned
-// character name (empty until a name binding is seen in the stream).
+// character name (empty until a name binding is seen — inside instances the cast
+// entity keys don't match the name bindings, so this is usually empty there) and
+// whether own-cast pairing believes this caster is you.
 type actCaster struct {
 	ID   uint64 `json:"id"`
 	Name string `json:"name"`
+	Mine bool   `json:"mine"`
+}
+
+// resetCasterState drops everything learned about who is casting, so a new capture
+// session can't inherit the previous one's entity keys — they're re-assigned on
+// reconnect. Callers hold e.mu.
+func (e *Engine) resetCasterState() {
+	e.actLog = nil
+	e.actSig = ""
+	e.casterFilter = 0
+	e.actorNames = map[uint64]string{}
+	e.actSeen = map[uint64]int64{}
+	e.ownVotes = map[uint64]int{}
+	e.ownCaster = 0
+	e.lastOwnReqAt = 0
+}
+
+// noteOwnRequest timestamps an outbound packet shaped like a skill request, so a
+// following ACT can be paired back to us. Called on the packet goroutine.
+func (e *Engine) noteOwnRequest(payloadLen int, now int64) {
+	if payloadLen == ownReqSize {
+		e.lastOwnReqAt = now
+	}
+}
+
+// voteOwnCaster credits a caster when its ACT lands in the window after one of our
+// own requests, and promotes it once the evidence repeats. Losing casters keep
+// their (low) counts, so a single coincidence never outruns the real one.
+func (e *Engine) voteOwnCaster(caster uint64, now int64) {
+	if e.lastOwnReqAt == 0 {
+		return
+	}
+	dt := now - e.lastOwnReqAt
+	if dt < int64(ownReqMinDelay) || dt > int64(ownReqMaxDelay) {
+		return
+	}
+	e.ownVotes[caster]++
+	if e.ownVotes[caster] < ownVotesNeeded || e.ownCaster == caster {
+		return
+	}
+	// Only take over from an existing decision on strictly better evidence.
+	if e.ownCaster != 0 && e.ownVotes[caster] <= e.ownVotes[e.ownCaster] {
+		return
+	}
+	e.ownCaster = caster
+	e.emitLog(fmt.Sprintf("Detected your caster: %d (matched %d of your own casts)", caster, e.ownVotes[caster]))
 }
 
 // recordActCaster accumulates the DISTINCT casters of your configured skills (in
-// first-seen order) for the current session and emits them (with any learned name)
-// as "capture:act-casters". Anyone who casts a configured skill stays in the list
-// even after they stop casting, so the picker never loses a valid option — the UI
-// keeps your selection sticky and only auto-locks when there's no valid pick yet.
-// Reset() clears the list on a session change, which lets the UI drop a stale
-// (previous-session) caster id and re-lock. Dedupes the emitted list so it stays
-// quiet. Runs only on the single packet goroutine, so the list needs no extra lock.
+// first-seen order) and emits them as "capture:act-casters" for the picker, each
+// flagged with whether own-cast pairing thinks it's you.
+//
+// Options expire after actCasterTTL of silence. That's what lets a new instance
+// re-lock on its own: entity keys are re-assigned on every entry, and while the
+// previous run's key was still listed the UI's sticky selection had no reason to
+// let go of it. Pruning happens here rather than on a timer because it only has to
+// be correct at the moment the list is emitted.
+//
+// resetCasterState clears everything on a session change. Dedupes the emitted list
+// so it stays quiet. Runs only on the single packet goroutine, so none of this
+// state needs a lock.
 func (e *Engine) recordActCaster(caster uint64) {
-	known := false
-	for _, id := range e.actLog {
-		if id == caster {
-			known = true
-			break
-		}
+	now := time.Now().UnixNano()
+	if e.ownCaster != 0 && now-e.actSeen[e.ownCaster] > int64(ownCasterIdle) {
+		delete(e.ownVotes, e.ownCaster) // stand down; don't make the next key out-vote a corpse
+		e.ownCaster = 0
 	}
-	if !known {
+	e.voteOwnCaster(caster, now)
+
+	if _, known := e.actSeen[caster]; !known {
 		e.actLog = append(e.actLog, caster)
 		if len(e.actLog) > actLogMax {
-			e.actLog = e.actLog[len(e.actLog)-actLogMax:] // bound: drop the oldest option
+			drop := e.actLog[:len(e.actLog)-actLogMax] // bound: drop the oldest options
+			for _, id := range drop {
+				delete(e.actSeen, id)
+				delete(e.ownVotes, id)
+			}
+			e.actLog = e.actLog[len(e.actLog)-actLogMax:]
 		}
 	}
+	e.actSeen[caster] = now
+
+	kept := e.actLog[:0]
+	for _, id := range e.actLog {
+		if now-e.actSeen[id] > int64(actCasterTTL) {
+			delete(e.actSeen, id)
+			delete(e.ownVotes, id)
+			if e.ownCaster == id {
+				e.ownCaster = 0 // that key is gone; pairing decides again
+			}
+			continue
+		}
+		kept = append(kept, id)
+	}
+	e.actLog = kept
+
 	list := make([]actCaster, 0, len(e.actLog))
 	for _, id := range e.actLog {
-		list = append(list, actCaster{ID: id, Name: e.actorNames[id]})
+		list = append(list, actCaster{ID: id, Name: e.actorNames[id], Mine: id == e.ownCaster})
 	}
 	sig := fmt.Sprint(list)
 	if sig == e.actSig {
@@ -799,10 +905,7 @@ func (e *Engine) Start(skills []SkillSpeed) error {
 	e.pingHasValue = false
 	e.lastPingEmit = 0
 	e.reasm.reset()
-	e.actLog = nil
-	e.actSig = ""
-	e.casterFilter = 0
-	e.actorNames = map[uint64]string{}
+	e.resetCasterState()
 	atomic.StoreUint64(&e.modified, 0)
 	e.mu.Unlock()
 
@@ -1259,6 +1362,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		now := time.Now().UnixNano()
 		e.lastReqByConn[srcPort] = now                          // last outbound time on this connection
 		e.lastReqPkt[srcPort] = append([]byte(nil), payload...) // copy, for pairing/decoding
+		e.noteOwnRequest(len(payload), now)                     // own-cast pairing (see voteOwnCaster)
 		requestHits := findAllSkillIDs(payload, scanIDs, scanFB, 0)
 		seenHellfire := map[uint32]struct{}{}
 		for _, hit := range requestHits {
