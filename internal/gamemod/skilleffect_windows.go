@@ -54,7 +54,9 @@ type skillEffectRelease struct {
 // builds may share one zip only when their extracted FX are byte-identical —
 // verify with the hash-diff in tools/effect-mod/README.md, never assume.
 var fallbackBuilds = map[string]skillEffectRelease{
-	// 88 rewrote P_AB_Buff_Cast_001/002/003, so it needs its own pak.
+	// 88 rewrote P_AB_Buff_Cast_001/002/003 and needed its own pak; 89 then left FX
+	// byte-identical to it, so the two share one.
+	"89": {URL: "https://static.logicxking.com/4934280b-270f-4c41-af7c-da5b06798f9c.zip", SHA256: "519c824a28c0da723ed5541b606114c7d09c91cae2cdb43a3a8787a4971e9635", SizeMB: 65},
 	"88": {URL: "https://static.logicxking.com/4934280b-270f-4c41-af7c-da5b06798f9c.zip", SHA256: "519c824a28c0da723ed5541b606114c7d09c91cae2cdb43a3a8787a4971e9635", SizeMB: 65},
 	// 86 and 87 left player FX byte-identical to 85 (verified each time: 0 new /
 	// 0 removed / 0 changed), so all three are served by the pak cooked from 85.

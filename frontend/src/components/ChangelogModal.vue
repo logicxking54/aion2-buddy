@@ -20,6 +20,14 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.12',
+    changes: [
+      { en: 'Ping Maker picks your caster up again by itself after you re-enter a dungeon — cast one of your configured skills and it locks on. If a party member plays your class, pick yourself from the dropdown as before.', th: 'Ping Maker จับ caster ของคุณเองได้อีกครั้งหลังลงดันใหม่ — ร่ายสกิลที่ตั้งค่าไว้ 1 ครั้งแล้วมันจะล็อกให้เอง ถ้ามีเพื่อนอาชีพเดียวกันในปาร์ตี้ ให้เลือกตัวเองจาก dropdown เหมือนเดิม', zh: 'Ping Maker 在重新進入副本後會自行重新鎖定你的施法者 — 施放一次已設定的技能即可。若隊伍中有相同職業的隊友，仍請從下拉選單選擇自己。' },
+      { en: 'The log now shows only the casts Ping Maker actually changed, instead of every skill it saw.', th: 'ช่อง log แสดงเฉพาะสกิลที่ Ping Maker แก้ไขจริง ไม่แสดงทุกสกิลที่มองเห็นแล้ว', zh: '紀錄現在只顯示 Ping Maker 實際修改過的技能，不再列出所有偵測到的技能。' },
+      { en: '"Disable Skill Effects" supports game builds 87 to 89.', th: '"ปิดเอฟเฟกต์สกิล" รองรับเกมเวอร์ชัน 87 ถึง 89', zh: '「關閉技能特效」支援遊戲版本 87 至 89。' },
+    ],
+  },
+  {
     version: '1.2.11',
     changes: [
       { en: '"Disable Skill Effects" now supports game builds 87 and 88. Support for new game builds arrives on its own — you no longer need to update the app after most game patches.', th: '"ปิดเอฟเฟกต์สกิล" รองรับเกมเวอร์ชัน 87 และ 88 แล้ว — การรองรับเวอร์ชันใหม่จะมาเองอัตโนมัติ ไม่ต้องอัปเดตแอปหลังเกมแพตช์อีกต่อไป (ในกรณีส่วนใหญ่)', zh: '「關閉技能特效」現已支援遊戲版本 87 與 88。新版本的支援會自動送達 — 大多數遊戲更新後不再需要更新此應用程式。' },
