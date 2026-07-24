@@ -34,12 +34,10 @@ export const errorMsg = ref('')
 export const gameDetected = ref(false)
 export const logs = reactive<LogEntry[]>([])
 
-// Recent casters of your configured skills, for the caster picker. `mine` is set
-// on the caster the engine paired with your own outbound skill requests.
+// Recent casters of your configured skills, for the caster picker.
 export interface ActCaster {
   id: number
   name: string
-  mine?: boolean
 }
 export const actCasters = ref<ActCaster[]>([])
 // Pick your own caster from the dropdown (same-class party case); 0 = all casters.
@@ -141,26 +139,15 @@ export async function initCapture() {
     ping.value = p ?? 0
   })
   // Caster picker: the engine emits the recent casters of YOUR configured skills as
-  // selectable options, flagging the one it paired with your own outbound skill
-  // requests. Preference order:
+  // selectable options. Your selection is STICKY while it's still listed, so nobody
+  // else casting your skills can steal the filter; a lone caster locks in on its own,
+  // and anything more ambiguous waits for you to pick.
   //
-  //  1. the paired caster — it wins even over an existing selection, because a
-  //     selection that disagrees with several of your own casts is simply wrong
-  //     (this is what re-locks you after re-entering an instance, where entity keys
-  //     are re-assigned, and what picks you out from a same-class party member);
-  //  2. otherwise your current selection, while it's still listed, so nobody else
-  //     casting your skills can steal the filter;
-  //  3. otherwise a lone caster; failing that nothing, and the UI asks.
-  //
-  // Options expire engine-side once a caster stops casting, so a dead key stops
-  // holding the selection hostage even before pairing has re-decided.
+  // Re-locking after re-entering an instance (where entity keys are re-assigned)
+  // comes from options expiring engine-side: the previous run's key stops casting,
+  // ages out, and the branch below runs again for the new one.
   EventsOn('capture:act-casters', (list: ActCaster[]) => {
     actCasters.value = Array.isArray(list) ? list : []
-    const mine = actCasters.value.find((c) => c.mine)
-    if (mine) {
-      config.casterRecord = mine.id
-      return
-    }
     const cur = Number(config.casterRecord)
     if (cur > 0 && actCasters.value.some((c) => c.id === cur)) return // keep your pick
     config.casterRecord = actCasters.value.length === 1 ? actCasters.value[0].id : 0

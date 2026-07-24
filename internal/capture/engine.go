@@ -200,9 +200,6 @@ type Engine struct {
 	actLog        []uint64          // recent configured-skill ACT casters (picker options), oldest first
 	actSeen       map[uint64]int64  // caster -> last configured-skill ACT time (ns), for expiry
 	actSig        string            // signature of the last emitted act-casters list (dedupe)
-	lastOwnReqAt  int64             // ns of the last outbound skill-request-shaped packet (own-cast pairing)
-	ownVotes      map[uint64]int    // caster -> times its ACT followed one of OUR requests
-	ownCaster     uint64            // caster the pairing is confident is us; 0 = undecided
 	running       bool
 
 	stop       chan struct{}
@@ -235,7 +232,6 @@ func NewEngine(emit func(event string, payload any)) *Engine {
 		tracker:       newEntityTracker(),
 		actorNames:    map[uint64]string{},
 		actSeen:       map[uint64]int64{},
-		ownVotes:      map[uint64]int{},
 		curPorts:      map[int]struct{}{},
 		lastReqByConn: map[int]int64{},
 		lastReqPkt:    map[int][]byte{},
@@ -425,32 +421,19 @@ const (
 	// takes longer than this, so the stale key is gone by the time you're back in.
 	actCasterTTL = 90 * time.Second
 
-	// Own-cast pairing. Our skill requests go out encrypted, but a request-shaped
-	// packet leaving just before an inbound ACT means that ACT is almost certainly
-	// ours. Delays below the floor are unrelated traffic that happened to be in
-	// flight; above the ceiling the correlation is worthless.
-	ownReqSize     = 28 // outbound payload length of a skill request
+	// Window a cast could plausibly fall in after one of our own outbound packets.
+	// Only TestReplaySessionPairing uses these now — see the note there on why
+	// correlating casts with our outbound traffic did NOT identify the local player.
 	ownReqMinDelay = 15 * time.Millisecond
 	ownReqMaxDelay = 400 * time.Millisecond
-	// Votes needed before we call a caster "you". One pairing is easy to hit by
-	// chance when a party member casts while our request is in flight; needing
-	// several makes that coincidence have to repeat, which it doesn't.
-	ownVotesNeeded = 3
-	// A decided caster gives up the title after this long without casting. Its
-	// votes would otherwise be a lead the next instance's key has to out-vote from
-	// zero, which is the wrong contest — a key that stopped casting is a key we've
-	// left behind, not a rival. Re-earned in ownVotesNeeded casts if it was just a lull.
-	ownCasterIdle = 30 * time.Second
 )
 
 // actCaster is one recent caster of a configured-skill ACT cast, with its learned
 // character name (empty until a name binding is seen — inside instances the cast
-// entity keys don't match the name bindings, so this is usually empty there) and
-// whether own-cast pairing believes this caster is you.
+// entity keys don't match the name bindings, so this is usually empty there).
 type actCaster struct {
 	ID   uint64 `json:"id"`
 	Name string `json:"name"`
-	Mine bool   `json:"mine"`
 }
 
 // resetCasterState drops everything learned about who is casting, so a new capture
@@ -462,53 +445,10 @@ func (e *Engine) resetCasterState() {
 	e.casterFilter = 0
 	e.actorNames = map[uint64]string{}
 	e.actSeen = map[uint64]int64{}
-	e.ownVotes = map[uint64]int{}
-	e.ownCaster = 0
-	e.lastOwnReqAt = 0
-}
-
-// noteOwnRequest timestamps an outbound packet shaped like a skill request, so a
-// following ACT can be paired back to us. Called on the packet goroutine.
-func (e *Engine) noteOwnRequest(payloadLen int, now int64) {
-	if payloadLen == ownReqSize {
-		e.lastOwnReqAt = now
-	}
-}
-
-// voteOwnCaster credits a caster when its ACT lands in the window after one of our
-// own requests, and promotes it once the evidence repeats. Losing casters keep
-// their (low) counts, so a single coincidence never outruns the real one.
-//
-// A request is consumed by the first ACT that pairs with it. Without that, a party
-// member of the same class casting the same skills collects a vote from every
-// window of ours their casts happen to fall in — which, while we're actively
-// casting, is a large share of the time. Consuming it means they can only score by
-// beating our own ACT back from the server, so their rate collapses to the rare
-// case of two casts genuinely racing.
-func (e *Engine) voteOwnCaster(caster uint64, now int64) {
-	if e.lastOwnReqAt == 0 {
-		return
-	}
-	dt := now - e.lastOwnReqAt
-	if dt < int64(ownReqMinDelay) || dt > int64(ownReqMaxDelay) {
-		return
-	}
-	e.lastOwnReqAt = 0 // spent on this ACT
-	e.ownVotes[caster]++
-	if e.ownVotes[caster] < ownVotesNeeded || e.ownCaster == caster {
-		return
-	}
-	// Only take over from an existing decision on strictly better evidence.
-	if e.ownCaster != 0 && e.ownVotes[caster] <= e.ownVotes[e.ownCaster] {
-		return
-	}
-	e.ownCaster = caster
-	e.emitLog(fmt.Sprintf("Detected your caster: %d (matched %d of your own casts)", caster, e.ownVotes[caster]))
 }
 
 // recordActCaster accumulates the DISTINCT casters of your configured skills (in
-// first-seen order) and emits them as "capture:act-casters" for the picker, each
-// flagged with whether own-cast pairing thinks it's you.
+// first-seen order) and emits them as "capture:act-casters" for the picker.
 //
 // Options expire after actCasterTTL of silence. That's what lets a new instance
 // re-lock on its own: entity keys are re-assigned on every entry, and while the
@@ -518,22 +458,15 @@ func (e *Engine) voteOwnCaster(caster uint64, now int64) {
 //
 // resetCasterState clears everything on a session change. Dedupes the emitted list
 // so it stays quiet. Runs only on the single packet goroutine, so none of this
-// state needs a lock.
-func (e *Engine) recordActCaster(caster uint64) {
-	now := time.Now().UnixNano()
-	if e.ownCaster != 0 && now-e.actSeen[e.ownCaster] > int64(ownCasterIdle) {
-		delete(e.ownVotes, e.ownCaster) // stand down; don't make the next key out-vote a corpse
-		e.ownCaster = 0
-	}
-	e.voteOwnCaster(caster, now)
-
+// state needs a lock. `now` is passed in rather than read here so a recorded
+// session can be replayed on its own timeline (see TestReplaySessionPairing).
+func (e *Engine) recordActCaster(caster uint64, now int64) {
 	if _, known := e.actSeen[caster]; !known {
 		e.actLog = append(e.actLog, caster)
 		if len(e.actLog) > actLogMax {
 			drop := e.actLog[:len(e.actLog)-actLogMax] // bound: drop the oldest options
 			for _, id := range drop {
 				delete(e.actSeen, id)
-				delete(e.ownVotes, id)
 			}
 			e.actLog = e.actLog[len(e.actLog)-actLogMax:]
 		}
@@ -544,10 +477,6 @@ func (e *Engine) recordActCaster(caster uint64) {
 	for _, id := range e.actLog {
 		if now-e.actSeen[id] > int64(actCasterTTL) {
 			delete(e.actSeen, id)
-			delete(e.ownVotes, id)
-			if e.ownCaster == id {
-				e.ownCaster = 0 // that key is gone; pairing decides again
-			}
 			continue
 		}
 		kept = append(kept, id)
@@ -556,7 +485,7 @@ func (e *Engine) recordActCaster(caster uint64) {
 
 	list := make([]actCaster, 0, len(e.actLog))
 	for _, id := range e.actLog {
-		list = append(list, actCaster{ID: id, Name: e.actorNames[id], Mine: id == e.ownCaster})
+		list = append(list, actCaster{ID: id, Name: e.actorNames[id]})
 	}
 	sig := fmt.Sprint(list)
 	if sig == e.actSig {
@@ -1115,7 +1044,7 @@ func (e *Engine) editCompressedCasts(
 		// so it still sees every caster of your own skill.
 		if caster != 0 {
 			if _, conf := lookup[hh.id]; conf {
-				e.recordActCaster(caster)
+				e.recordActCaster(caster, time.Now().UnixNano())
 			}
 		}
 
@@ -1370,7 +1299,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		now := time.Now().UnixNano()
 		e.lastReqByConn[srcPort] = now                          // last outbound time on this connection
 		e.lastReqPkt[srcPort] = append([]byte(nil), payload...) // copy, for pairing/decoding
-		e.noteOwnRequest(len(payload), now)                     // own-cast pairing (see voteOwnCaster)
 		requestHits := findAllSkillIDs(payload, scanIDs, scanFB, 0)
 		seenHellfire := map[uint32]struct{}{}
 		for _, hit := range requestHits {
@@ -1517,7 +1445,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		// every caster of your own skill.
 		if is02 && caster != 0 {
 			if _, conf := lookup[hh.id]; conf {
-				e.recordActCaster(caster)
+				e.recordActCaster(caster, now)
 			}
 		}
 
