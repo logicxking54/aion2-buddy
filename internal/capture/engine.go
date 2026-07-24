@@ -803,8 +803,15 @@ func (e *Engine) SetCatalog(entries []CatalogEntry) {
 	e.mu.Unlock()
 }
 
+// logUsedCasts controls the "Used <skill>" log line for casts we don't edit. Off:
+// the console is meant to show only what the engine changed on your own caster, and
+// these lines flood it with every buff tick and every party member's catalogued
+// skill. See the call site for what turning it on gets you.
+const logUsedCasts = false
+
 // shouldLogUsed throttles duplicate "used" lines for the same (skill, action).
-// Only called from the single packet-processing goroutine.
+// Only called from the single packet-processing goroutine. Retained for when
+// logUsedCasts is switched back on.
 func (e *Engine) shouldLogUsed(id uint32, tick byte) bool {
 	key := uint64(id)<<8 | uint64(tick)
 	now := time.Now().UnixNano()
@@ -1662,18 +1669,23 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			}
 		}
 
-		// Otherwise just log the cast (deduped per skill + action tick). Include the
-		// packet_type so it's easy to spot buff (0x00) vs ACT (0x02) casts in the log.
-		tick := byte(0)
-		if hh.offset+4 < len(payload) {
-			tick = payload[hh.offset+4]
-		}
-		pt := byte(0xff)
-		if hh.offset+5 < len(payload) {
-			pt = payload[hh.offset+5]
-		}
-		if e.shouldLogUsed(hh.id, tick) {
-			e.emitLog(fmt.Sprintf("Used %s%s [pt: %d]", name, casterOnly, pt))
+		// A cast we didn't edit — any catalogued skill, including every buff tick and
+		// every skill not on your edit list. Off by default: it buries the "ACT" lines
+		// (the casts we actually changed) under traffic you can't act on. Kept because
+		// it's the only view of what the client is receiving that isn't the packet
+		// inspector, which is far noisier. Flip logUsedCasts to bring it back.
+		if logUsedCasts {
+			tick := byte(0)
+			if hh.offset+4 < len(payload) {
+				tick = payload[hh.offset+4]
+			}
+			pt := byte(0xff)
+			if hh.offset+5 < len(payload) {
+				pt = payload[hh.offset+5]
+			}
+			if e.shouldLogUsed(hh.id, tick) {
+				e.emitLog(fmt.Sprintf("Used %s%s [pt: %d]", name, casterOnly, pt))
+			}
 		}
 	}
 }
