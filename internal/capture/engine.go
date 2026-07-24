@@ -478,6 +478,13 @@ func (e *Engine) noteOwnRequest(payloadLen int, now int64) {
 // voteOwnCaster credits a caster when its ACT lands in the window after one of our
 // own requests, and promotes it once the evidence repeats. Losing casters keep
 // their (low) counts, so a single coincidence never outruns the real one.
+//
+// A request is consumed by the first ACT that pairs with it. Without that, a party
+// member of the same class casting the same skills collects a vote from every
+// window of ours their casts happen to fall in — which, while we're actively
+// casting, is a large share of the time. Consuming it means they can only score by
+// beating our own ACT back from the server, so their rate collapses to the rare
+// case of two casts genuinely racing.
 func (e *Engine) voteOwnCaster(caster uint64, now int64) {
 	if e.lastOwnReqAt == 0 {
 		return
@@ -486,6 +493,7 @@ func (e *Engine) voteOwnCaster(caster uint64, now int64) {
 	if dt < int64(ownReqMinDelay) || dt > int64(ownReqMaxDelay) {
 		return
 	}
+	e.lastOwnReqAt = 0 // spent on this ACT
 	e.ownVotes[caster]++
 	if e.ownVotes[caster] < ownVotesNeeded || e.ownCaster == caster {
 		return

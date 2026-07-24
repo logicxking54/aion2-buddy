@@ -40,6 +40,17 @@ func (h *casterHarness) otherCast(caster uint64) {
 	h.e.recordActCaster(caster)
 }
 
+// castInOurWindow simulates someone else's ACT arriving while one of our requests
+// is still unanswered — the way a same-class party member can steal a pairing.
+func (h *casterHarness) castInOurWindow(caster uint64) {
+	h.e.recordActCaster(caster)
+}
+
+// sendRequest opens a pairing window without delivering any ACT yet.
+func (h *casterHarness) sendRequest() {
+	h.e.noteOwnRequest(ownReqSize, time.Now().UnixNano()-int64(80*time.Millisecond))
+}
+
 // age backdates a caster's last-seen time, standing in for elapsed real time.
 func (h *casterHarness) age(caster uint64, d time.Duration) {
 	h.e.actSeen[caster] -= int64(d)
@@ -97,6 +108,77 @@ func TestOwnCastPairingIgnoresUnpairedCaster(t *testing.T) {
 	}
 	if len(h.last) != 2 {
 		t.Fatalf("picker lists %v, want both casters as options", h.ids())
+	}
+}
+
+// The case the pairing exists for: a party member of the same class casting the
+// same skills. Their ACTs keep landing inside our pairing windows, but ours get
+// there first, so the window is already spent and they never build a case.
+func TestSameClassPartyMemberDoesNotStealTheLock(t *testing.T) {
+	const me, friend = 4242, 9999
+	h := newCasterHarness()
+
+	for i := 0; i < 12; i++ {
+		h.sendRequest()
+		h.castInOurWindow(me)     // our own ACT answers our request
+		h.castInOurWindow(friend) // theirs lands in the same window, but it's spent
+	}
+
+	if got := h.mine(); got != me {
+		t.Fatalf("mine = %d, want %d", got, me)
+	}
+	if v := h.e.ownVotes[friend]; v != 0 {
+		t.Fatalf("party member collected %d votes, want 0 — our ACT consumed every window", v)
+	}
+}
+
+// Same party, but the friend's ACT sometimes beats ours back from the server. They
+// pick up the odd vote; we should still end up locked correctly.
+func TestSameClassPartyMemberWinningSomeRacesStillLosesOverall(t *testing.T) {
+	const me, friend = 4242, 9999
+	h := newCasterHarness()
+
+	for i := 0; i < 20; i++ {
+		h.sendRequest()
+		if i%4 == 0 {
+			h.castInOurWindow(friend) // they win the race this round
+			h.castInOurWindow(me)     // ours arrives, window already spent
+		} else {
+			h.castInOurWindow(me)
+			h.castInOurWindow(friend)
+		}
+	}
+
+	if got := h.mine(); got != me {
+		t.Fatalf("mine = %d, want %d", got, me)
+	}
+	if h.e.ownVotes[me] <= h.e.ownVotes[friend] {
+		t.Fatalf("votes me=%d friend=%d, want ours clearly ahead", h.e.ownVotes[me], h.e.ownVotes[friend])
+	}
+}
+
+// If the friend gets crowned early by luck, our steadier pairing must take it back
+// rather than leaving the filter on the wrong player.
+func TestLockMovesToUsAfterAnEarlyWrongDecision(t *testing.T) {
+	const me, friend = 4242, 9999
+	h := newCasterHarness()
+
+	for i := 0; i < ownVotesNeeded; i++ { // unlucky start: they win every race
+		h.sendRequest()
+		h.castInOurWindow(friend)
+		h.castInOurWindow(me)
+	}
+	if h.mine() != friend {
+		t.Fatalf("setup expected the friend crowned first, got %d", h.mine())
+	}
+
+	for i := 0; i < 10; i++ { // then normal play resumes
+		h.sendRequest()
+		h.castInOurWindow(me)
+		h.castInOurWindow(friend)
+	}
+	if got := h.mine(); got != me {
+		t.Fatalf("mine = %d, want the lock to move to %d", got, me)
 	}
 }
 
