@@ -4,6 +4,8 @@ import {gamemod} from '../models';
 
 export function ApplyNIC():Promise<gamemod.TweakStatus>;
 
+export function ApplyPerf():Promise<gamemod.TweakStatus>;
+
 export function ApplySkillEffect():Promise<gamemod.SkillEffectInfo>;
 
 export function ApplyTCP():Promise<gamemod.TweakStatus>;
@@ -12,11 +14,15 @@ export function IntroStatus():Promise<gamemod.Status>;
 
 export function NICStatus():Promise<gamemod.TweakStatus>;
 
+export function PerfStatus():Promise<gamemod.TweakStatus>;
+
 export function RemoveIntro():Promise<gamemod.Status>;
 
 export function RestoreIntro():Promise<gamemod.Status>;
 
 export function RevertNIC():Promise<gamemod.TweakStatus>;
+
+export function RevertPerf():Promise<gamemod.TweakStatus>;
 
 export function RevertSkillEffect():Promise<gamemod.SkillEffectInfo>;
 

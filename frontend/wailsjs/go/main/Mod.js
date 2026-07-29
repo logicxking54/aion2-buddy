@@ -6,6 +6,10 @@ export function ApplyNIC() {
   return window['go']['main']['Mod']['ApplyNIC']();
 }
 
+export function ApplyPerf() {
+  return window['go']['main']['Mod']['ApplyPerf']();
+}
+
 export function ApplySkillEffect() {
   return window['go']['main']['Mod']['ApplySkillEffect']();
 }
@@ -22,6 +26,10 @@ export function NICStatus() {
   return window['go']['main']['Mod']['NICStatus']();
 }
 
+export function PerfStatus() {
+  return window['go']['main']['Mod']['PerfStatus']();
+}
+
 export function RemoveIntro() {
   return window['go']['main']['Mod']['RemoveIntro']();
 }
@@ -32,6 +40,10 @@ export function RestoreIntro() {
 
 export function RevertNIC() {
   return window['go']['main']['Mod']['RevertNIC']();
+}
+
+export function RevertPerf() {
+  return window['go']['main']['Mod']['RevertPerf']();
 }
 
 export function RevertSkillEffect() {

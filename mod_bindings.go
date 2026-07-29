@@ -85,6 +85,21 @@ func (m *Mod) RevertNIC() (gamemod.TweakStatus, error) {
 	return gamemod.RevertNIC(m.emitLog)
 }
 
+// PerfStatus reports whether the max-FPS Engine.ini block is applied.
+func (m *Mod) PerfStatus() gamemod.TweakStatus {
+	return gamemod.PerfStatus()
+}
+
+// ApplyPerf writes the max-FPS cvar block into the game's user Engine.ini.
+func (m *Mod) ApplyPerf() (gamemod.TweakStatus, error) {
+	return gamemod.ApplyPerf(m.emitLog)
+}
+
+// RevertPerf removes the max-FPS block, leaving the game's own ini content.
+func (m *Mod) RevertPerf() (gamemod.TweakStatus, error) {
+	return gamemod.RevertPerf(m.emitLog)
+}
+
 // --- Disable Skill Effects (override .pak in Content\Paks) ------------------
 // A prebuilt combined override pak (every class's skill VFX disabled) is
 // downloaded on first enable and dropped into the game's Paks folder. Strictly

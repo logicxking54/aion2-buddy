@@ -53,6 +53,9 @@ interface ModBackend {
   NICStatus(): Promise<TweakStatus>
   ApplyNIC(): Promise<TweakStatus>
   RevertNIC(): Promise<TweakStatus>
+  PerfStatus(): Promise<TweakStatus>
+  ApplyPerf(): Promise<TweakStatus>
+  RevertPerf(): Promise<TweakStatus>
   SkillEffectStatus(): Promise<SkillEffectStatus>
   ApplySkillEffect(): Promise<SkillEffectStatus>
   RevertSkillEffect(): Promise<SkillEffectStatus>
@@ -108,13 +111,15 @@ interface SysMod {
   status: keyof ModBackend
   apply: keyof ModBackend
   revert: keyof ModBackend
+  admin: boolean // true = needs Administrator (shows the shared admin note)
   applied: boolean
   detail: string
   busy: boolean
 }
 const sysMods = reactive<SysMod[]>([
-  { key: 'tcp', status: 'TCPStatus', apply: 'ApplyTCP', revert: 'RevertTCP', applied: false, detail: '', busy: false },
-  { key: 'nic', status: 'NICStatus', apply: 'ApplyNIC', revert: 'RevertNIC', applied: false, detail: '', busy: false },
+  { key: 'tcp', status: 'TCPStatus', apply: 'ApplyTCP', revert: 'RevertTCP', admin: true, applied: false, detail: '', busy: false },
+  { key: 'nic', status: 'NICStatus', apply: 'ApplyNIC', revert: 'RevertNIC', admin: true, applied: false, detail: '', busy: false },
+  { key: 'perf', status: 'PerfStatus', apply: 'ApplyPerf', revert: 'RevertPerf', admin: false, applied: false, detail: '', busy: false },
 ])
 
 async function refreshSys(m: SysMod) {
@@ -282,7 +287,7 @@ onMounted(() => {
           <div class="text-xs text-slate-400">{{ t(`mod.${m.key}Desc`) }}</div>
           <div class="mt-1 truncate text-[11px] text-slate-500">
             <template v-if="!available">{{ t('mod.backendUnavailable') }}</template>
-            <template v-else>🛠 {{ t('mod.adminNote') }}<span v-if="m.detail"> · {{ m.detail }}</span></template>
+            <template v-else>🛠 {{ m.admin ? t('mod.adminNote') : t(`mod.${m.key}Note`) }}<span v-if="m.detail"> · {{ m.detail }}</span></template>
           </div>
         </div>
         <button

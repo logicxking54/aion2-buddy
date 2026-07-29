@@ -22,6 +22,11 @@ Menus live under `frontend/src/projects/`, registered in `registry.ts`:
     publishing steps: `tools/effect-mod/README.md`.
   - **Disable other players' skill animations** (`config.animMask`) — not a file mod: a
     live capture-engine packet rewrite, so it only applies while capture is running.
+  - **Performance Config** (`perfconfig_windows.go`) — max-FPS cvar block appended to the
+    game's user `Engine.ini` (`%LOCALAPPDATA%\AION2\Saved*\Config\Windows`) between marker
+    comments; revert strips the block. The updater resets the ini every patch, so the
+    toggle reads OFF afterwards — by design. `fx.Niagara.QualityLevel` must stay ≥1
+    (0 culls boss telegraph emitters; a test enforces this).
 - **Packet Inspector** (dev) — dump packets (hex + opcodes), record sessions to JSONL,
   decode casts.
 - **Settings**.

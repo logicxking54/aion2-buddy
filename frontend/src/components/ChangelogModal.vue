@@ -20,6 +20,13 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.13',
+    changes: [
+      { en: 'New Mod: "Performance Config (max FPS)" — one toggle that writes an aggressive graphics config (Lumen & shadows off, post-processing off, cheaper effects and crowds, DLSS Frame Generation for RTX 40-series). Fully reversible; re-enable it after a game patch. Boss telegraph effects stay visible.', th: 'มอดใหม่: "Performance Config (เน้น FPS สูงสุด)" — สวิตช์เดียวเขียนคอนฟิกกราฟิกแบบรีด FPS สุด (ปิด Lumen และเงา, ปิด post-processing, ลดเอฟเฟกต์และฝูงคน, เปิด DLSS Frame Generation สำหรับ RTX 40) ย้อนกลับได้ทั้งหมด — หลังเกมแพตช์ให้กดเปิดใหม่ วงเตือนสกิลบอสยังแสดงปกติ', zh: '新模組：「Performance Config（極限 FPS）」— 一鍵寫入激進圖形設定（關閉 Lumen 與陰影、關閉後處理、降低特效與人群細節、為 RTX 40 系列開啟 DLSS 影格生成）。完全可還原；遊戲更新後請重新開啟。Boss 警示特效仍會顯示。' },
+      { en: '"Disable Skill Effects" supports game builds 91 and 92.', th: '"ปิดเอฟเฟกต์สกิล" รองรับเกมเวอร์ชัน 91 และ 92', zh: '「關閉技能特效」支援遊戲版本 91 與 92。' },
+    ],
+  },
+  {
     version: '1.2.12',
     changes: [
       { en: 'Ping Maker picks your caster up again by itself after you re-enter a dungeon — cast one of your configured skills and it locks on. If a party member plays your class, pick yourself from the dropdown as before.', th: 'Ping Maker จับ caster ของคุณเองได้อีกครั้งหลังลงดันใหม่ — ร่ายสกิลที่ตั้งค่าไว้ 1 ครั้งแล้วมันจะล็อกให้เอง ถ้ามีเพื่อนอาชีพเดียวกันในปาร์ตี้ ให้เลือกตัวเองจาก dropdown เหมือนเดิม', zh: 'Ping Maker 在重新進入副本後會自行重新鎖定你的施法者 — 施放一次已設定的技能即可。若隊伍中有相同職業的隊友，仍請從下拉選單選擇自己。' },
