@@ -73,10 +73,20 @@ var perfCvars = []string{
 	"r.Tonemapper.GrainQuantization=0",
 	"r.VolumetricFog=0",
 	"r.VolumetricCloud=0",
-	"; --- world geometry ---",
-	"foliage.DensityScale=0.2",
-	"grass.DensityScale=0",
+	// The cheap way to get what "strip the scenery" mods do by emptying assets:
+	// DetailMode culls props the artists marked as decoration, MaterialQualityLevel
+	// drops every surface to its simplest shader, the LOD biases pick coarser
+	// meshes, and HLOD swaps distant clusters for a single proxy. All revert in one
+	// click and survive game patches, which asset edits do not.
+	"; --- world geometry and materials ---",
+	"r.DetailMode=0",
+	"r.MaterialQualityLevel=0",
+	"r.StaticMeshLODBias=2",
 	"r.SkeletalMeshLODBias=2",
+	"r.HLOD=1",
+	"foliage.DensityScale=0.2",
+	"foliage.LODDistanceScale=0.5",
+	"grass.DensityScale=0",
 	"r.ViewDistanceScale=0.6",
 	// Sized for an 8GB card, which is what this preset's Frame Generation target
 	// (a 4060 Ti) usually is. DLSS-G itself costs roughly 1-1.5GB on top of the
