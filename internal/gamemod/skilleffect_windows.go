@@ -54,6 +54,9 @@ type skillEffectRelease struct {
 // builds may share one zip only when their extracted FX are byte-identical —
 // verify with the hash-diff in tools/effect-mod/README.md, never assume.
 var fallbackBuilds = map[string]skillEffectRelease{
+	// 93 rebalanced classes and rewrote 84 player FX assets (Templar, Cleric,
+	// Chanter, Assassin, Elementalist), so it needed its own pak.
+	"93": {URL: "https://static.logicxking.com/8b4b6c14-6364-4a67-a6f9-d64173f42fdf.zip", SHA256: "6aaa3de8cd7b203c16bb75afe186ca057b0129f521eb6becc3e6b5e990cc3083", SizeMB: 63},
 	// 91 was a large FX patch (318 assets removed, ~5600 rewritten) and needed its
 	// own pak; 92 left FX byte-identical to it, so the two share one.
 	"92": {URL: "https://static.logicxking.com/bde7f4c0-c613-4c3e-896e-f7389a1f7643.zip", SHA256: "bb6e0c31cd32a7f9caebb2c4f19251582b0c9b02a30f9c759af8dee45fdf9209", SizeMB: 63},

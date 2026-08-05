@@ -20,6 +20,14 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.14',
+    changes: [
+      { en: 'Fixed Performance Config not turning off. The game rewrites its config file and strips comments, which the mod used to find its own settings — so the switch read as off while the settings stayed, and enabling it again just added another copy. It now finds its settings by name, cleans up any duplicates it left behind, and turns off properly.', th: 'แก้ปัญหา Performance Config ปิดไม่ได้ — เกมเขียนไฟล์ config ใหม่แล้วตัดคอมเมนต์ที่มอดใช้ระบุค่าของตัวเองทิ้ง ทำให้สวิตช์ขึ้นว่าปิดทั้งที่ค่ายังอยู่ และกดเปิดใหม่ก็เพิ่มค่าซ้ำเข้าไปอีก ตอนนี้ระบุค่าด้วยชื่อแทน ล้างค่าซ้ำที่ค้างไว้ให้ และปิดได้จริงแล้ว', zh: '修正 Performance Config 無法關閉的問題。遊戲會重寫設定檔並移除註解，而模組原本靠註解辨識自己的設定 — 導致開關顯示為關閉但設定仍在，再次啟用只會重複寫入。現在改以設定名稱辨識，會清理殘留的重複項目，並能正常關閉。' },
+      { en: 'Performance Config now sizes the texture pool for 8GB graphics cards, leaving room for DLSS Frame Generation.', th: 'Performance Config ปรับขนาด texture pool ให้เหมาะกับการ์ดจอ 8GB เผื่อพื้นที่ให้ DLSS Frame Generation', zh: 'Performance Config 現在會依 8GB 顯示卡調整貼圖快取大小，為 DLSS 影格生成保留空間。' },
+      { en: '"Disable Skill Effects" supports game build 93.', th: '"ปิดเอฟเฟกต์สกิล" รองรับเกมเวอร์ชัน 93', zh: '「關閉技能特效」支援遊戲版本 93。' },
+    ],
+  },
+  {
     version: '1.2.13',
     changes: [
       { en: 'New Mod: "Performance Config (max FPS)" — one toggle that writes an aggressive graphics config (Lumen & shadows off, post-processing off, cheaper effects and crowds, DLSS Frame Generation for RTX 40-series). Fully reversible; re-enable it after a game patch. Boss telegraph effects stay visible.', th: 'มอดใหม่: "Performance Config (เน้น FPS สูงสุด)" — สวิตช์เดียวเขียนคอนฟิกกราฟิกแบบรีด FPS สุด (ปิด Lumen และเงา, ปิด post-processing, ลดเอฟเฟกต์และฝูงคน, เปิด DLSS Frame Generation สำหรับ RTX 40) ย้อนกลับได้ทั้งหมด — หลังเกมแพตช์ให้กดเปิดใหม่ วงเตือนสกิลบอสยังแสดงปกติ', zh: '新模組：「Performance Config（極限 FPS）」— 一鍵寫入激進圖形設定（關閉 Lumen 與陰影、關閉後處理、降低特效與人群細節、為 RTX 40 系列開啟 DLSS 影格生成）。完全可還原；遊戲更新後請重新開啟。Boss 警示特效仍會顯示。' },
