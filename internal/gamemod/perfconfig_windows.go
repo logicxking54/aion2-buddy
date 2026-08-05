@@ -78,9 +78,14 @@ var perfCvars = []string{
 	"grass.DensityScale=0",
 	"r.SkeletalMeshLODBias=2",
 	"r.ViewDistanceScale=0.6",
-	"; --- texture streaming (8GB-VRAM friendly) ---",
-	"r.Streaming.PoolSize=5000",
+	// Sized for an 8GB card, which is what this preset's Frame Generation target
+	// (a 4060 Ti) usually is. DLSS-G itself costs roughly 1-1.5GB on top of the
+	// render targets, so a 5GB texture pool left too little headroom and traded
+	// stutter for sharpness in exactly the crowded fights we're optimising for.
+	"; --- texture streaming (sized for 8GB VRAM alongside Frame Generation) ---",
+	"r.Streaming.PoolSize=3500",
 	"r.Streaming.MipBias=1",
+	"r.Streaming.LimitPoolSizeToVRAM=1",
 }
 
 // perfCvarKeys returns the setting names we manage (the part before '='), skipping
