@@ -48,8 +48,8 @@ func TestPerfManual(t *testing.T) {
 			t.Fatal(err)
 		}
 		mid, _ := os.ReadFile(p)
-		if !strings.Contains(string(mid), perfBeginMarker) {
-			t.Fatal("block not present after apply")
+		if set, dupes := perfCountApplied(string(mid)); set == 0 || dupes != 0 {
+			t.Fatalf("after apply: %d settings present, %d duplicates (want all, none)", set, dupes)
 		}
 		if !PerfStatus().Applied {
 			t.Fatal("status should report applied")
