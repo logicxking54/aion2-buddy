@@ -14,7 +14,7 @@
     !define INFO_PRODUCTNAME "aion2-buddy"
 !endif
 !ifndef INFO_PRODUCTVERSION
-    !define INFO_PRODUCTVERSION "1.2.14"
+    !define INFO_PRODUCTVERSION "1.2.15"
 !endif
 !ifndef INFO_COPYRIGHT
     !define INFO_COPYRIGHT "Copyright........."

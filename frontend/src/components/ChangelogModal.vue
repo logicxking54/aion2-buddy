@@ -20,6 +20,14 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.15',
+    changes: [
+      { en: 'Performance Config now strips more scenery detail — decorative props, simpler surface shaders, coarser distant geometry and less foliage.', th: 'Performance Config ตัดรายละเอียดฉากได้มากขึ้น — ของประดับ, พื้นผิวแบบเรียบง่าย, ฉากไกลหยาบลง และลดต้นไม้ใบหญ้า', zh: 'Performance Config 現在會移除更多場景細節 — 裝飾物件、更簡化的表面著色、更粗略的遠景幾何與更少的植被。' },
+      { en: 'Performance Config no longer shrinks and blurs textures on cards with plenty of memory. It now asks for a large texture budget and lets the game scale that back on smaller cards.', th: 'Performance Config ไม่ลดและทำให้ texture เบลอบนการ์ดที่มีหน่วยความจำเหลือเฟืออีกแล้ว — ตอนนี้ขอพื้นที่ texture เยอะไว้ก่อน แล้วให้เกมลดเองบนการ์ดที่เล็กกว่า', zh: 'Performance Config 不再於記憶體充足的顯示卡上縮減並模糊貼圖。現在會要求較大的貼圖配額，並讓遊戲在較小的顯示卡上自行縮減。' },
+      { en: '"Disable Skill Effects" supports game build 94.', th: '"ปิดเอฟเฟกต์สกิล" รองรับเกมเวอร์ชัน 94', zh: '「關閉技能特效」支援遊戲版本 94。' },
+    ],
+  },
+  {
     version: '1.2.14',
     changes: [
       { en: 'Fixed Performance Config not turning off. The game rewrites its config file and strips comments, which the mod used to find its own settings — so the switch read as off while the settings stayed, and enabling it again just added another copy. It now finds its settings by name, cleans up any duplicates it left behind, and turns off properly.', th: 'แก้ปัญหา Performance Config ปิดไม่ได้ — เกมเขียนไฟล์ config ใหม่แล้วตัดคอมเมนต์ที่มอดใช้ระบุค่าของตัวเองทิ้ง ทำให้สวิตช์ขึ้นว่าปิดทั้งที่ค่ายังอยู่ และกดเปิดใหม่ก็เพิ่มค่าซ้ำเข้าไปอีก ตอนนี้ระบุค่าด้วยชื่อแทน ล้างค่าซ้ำที่ค้างไว้ให้ และปิดได้จริงแล้ว', zh: '修正 Performance Config 無法關閉的問題。遊戲會重寫設定檔並移除註解，而模組原本靠註解辨識自己的設定 — 導致開關顯示為關閉但設定仍在，再次啟用只會重複寫入。現在改以設定名稱辨識，會清理殘留的重複項目，並能正常關閉。' },
