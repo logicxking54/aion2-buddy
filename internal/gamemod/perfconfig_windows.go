@@ -88,13 +88,17 @@ var perfCvars = []string{
 	"foliage.LODDistanceScale=0.5",
 	"grass.DensityScale=0",
 	"r.ViewDistanceScale=0.6",
-	// Sized for an 8GB card, which is what this preset's Frame Generation target
-	// (a 4060 Ti) usually is. DLSS-G itself costs roughly 1-1.5GB on top of the
-	// render targets, so a 5GB texture pool left too little headroom and traded
-	// stutter for sharpness in exactly the crowded fights we're optimising for.
-	"; --- texture streaming (sized for 8GB VRAM alongside Frame Generation) ---",
-	"r.Streaming.PoolSize=3500",
-	"r.Streaming.MipBias=1",
+	// Ask for a pool a 16GB card can actually use and let LimitPoolSizeToVRAM clamp
+	// it down on smaller ones, rather than hardcoding a floor everybody pays for.
+	// The previous 3500 was sized for an 8GB 4060 Ti and left a 16GB card streaming
+	// textures in and out with VRAM sitting idle.
+	//
+	// MipBias is held at 0 rather than dropped from the list: it stays a key we
+	// manage, so applying this version clears the =1 an older version wrote. Blurring
+	// every texture buys nothing once the pool is big enough to hold them.
+	"; --- texture streaming (clamped to whatever VRAM the card actually has) ---",
+	"r.Streaming.PoolSize=8000",
+	"r.Streaming.MipBias=0",
 	"r.Streaming.LimitPoolSizeToVRAM=1",
 }
 
@@ -293,7 +297,7 @@ func ApplyPerf(log Logger) (TweakStatus, error) {
 		return PerfStatus(), fmt.Errorf("writing Engine.ini failed: %w", err)
 	}
 	log.log("Perf: max-FPS config written to %s (%d settings)", p, len(perfCvarKeys()))
-	log.log("Perf: takes effect the next time the game starts. Frame Generation additionally needs Windows HAGS on + an RTX 40-series GPU.")
+	log.log("Perf: takes effect the next time the game starts. Frame Generation additionally needs Windows HAGS on + an RTX 40-series or newer GPU.")
 	log.log("Perf: a game patch resets this file - just toggle it on again afterwards.")
 	return PerfStatus(), nil
 }
