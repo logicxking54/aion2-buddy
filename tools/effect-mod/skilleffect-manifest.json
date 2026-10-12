@@ -1,5 +1,20 @@
 {
   "builds": {
+    "106": {
+      "url": "https://static.logicxking.com/1fa91636-2cee-4f57-a615-9739c226c027.zip",
+      "sha256": "14542a4ae282fd2ed696ddb2241dfe8e25ba4db617c05a9f874a868783d3fd0d",
+      "sizeMB": 67
+    },
+    "98": {
+      "url": "https://static.logicxking.com/5c9f29af-5866-4613-8fad-de299ef8e687.zip",
+      "sha256": "8c69a3ed91b33f979be9049e32556ae38a61828c509ec641c46d663f38ec7add",
+      "sizeMB": 67
+    },
+    "97": {
+      "url": "https://static.logicxking.com/5c9f29af-5866-4613-8fad-de299ef8e687.zip",
+      "sha256": "8c69a3ed91b33f979be9049e32556ae38a61828c509ec641c46d663f38ec7add",
+      "sizeMB": 67
+    },
     "95": {
       "url": "https://static.logicxking.com/eaaf6de1-a4dc-4665-92a2-a94f15843787.zip",
       "sha256": "d7fd22627932548e26ae5cd14e7e85fa9add07fdaea748d8ae8c23a3c3ecf6ff",

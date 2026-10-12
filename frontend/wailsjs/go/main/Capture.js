@@ -6,20 +6,8 @@ export function IsCapturing() {
   return window['go']['main']['Capture']['IsCapturing']();
 }
 
-export function SetAnimMask(arg1, arg2) {
-  return window['go']['main']['Capture']['SetAnimMask'](arg1, arg2);
-}
-
-export function SetAuto(arg1, arg2, arg3) {
-  return window['go']['main']['Capture']['SetAuto'](arg1, arg2, arg3);
-}
-
 export function SetCasterFilter(arg1) {
   return window['go']['main']['Capture']['SetCasterFilter'](arg1);
-}
-
-export function SetCasterMask(arg1, arg2, arg3) {
-  return window['go']['main']['Capture']['SetCasterMask'](arg1, arg2, arg3);
 }
 
 export function SetCatalog(arg1) {
@@ -30,20 +18,8 @@ export function SetCharacterNames(arg1) {
   return window['go']['main']['Capture']['SetCharacterNames'](arg1);
 }
 
-export function SetDecode(arg1) {
-  return window['go']['main']['Capture']['SetDecode'](arg1);
-}
-
-export function SetInspect(arg1, arg2) {
-  return window['go']['main']['Capture']['SetInspect'](arg1, arg2);
-}
-
-export function SetSessionRecord(arg1) {
-  return window['go']['main']['Capture']['SetSessionRecord'](arg1);
-}
-
-export function SetStatSpeed(arg1, arg2) {
-  return window['go']['main']['Capture']['SetStatSpeed'](arg1, arg2);
+export function SetGameBoost(arg1) {
+  return window['go']['main']['Capture']['SetGameBoost'](arg1);
 }
 
 export function StartCapture(arg1) {

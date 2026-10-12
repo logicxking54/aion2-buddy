@@ -8,6 +8,7 @@ import (
 	"math"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Wire format (from skill_offset X), per pingmaker's protocol.py:
@@ -456,6 +457,111 @@ type actorBinding struct {
 	actorID uint64
 	name    string
 }
+
+// scanLocalIdentity reads a candidate identity record:
+//
+//	33 36 [entity_id varint] [mask1 u32] [mask2 u8] [name_len u8] [UTF-8 name]
+//
+// Bit 0 of mask2 indicates that the name field is present. A configured character
+// name must match before accepting this candidate; the opcode alone is not proof
+// that the record belongs to the user's character. Keep scanning after mismatches.
+func scanLocalIdentity(data []byte, acceptsName func(string) bool) (actorBinding, bool) {
+	for i := 0; i+2 < len(data); i++ {
+		if data[i] != 0x33 || data[i+1] != 0x36 {
+			continue
+		}
+
+		pos := i + 2
+		actorID, actorLen := parseVarint(data, pos)
+		if actorLen <= 0 || pos+actorLen > len(data) || data[pos+actorLen-1]&0x80 != 0 ||
+			actorID == 0 || actorID > 9_999_999 {
+			continue
+		}
+		pos += actorLen
+
+		// mask1 (4 bytes), mask2 (1 byte), then the optional name length.
+		if pos+6 > len(data) {
+			continue
+		}
+		pos += 4
+		mask2 := data[pos]
+		pos++
+		if mask2&0x01 == 0 {
+			continue
+		}
+
+		nameLen := int(data[pos])
+		pos++
+		if nameLen < 2 || nameLen > 36 || pos+nameLen > len(data) {
+			continue
+		}
+		nameBytes := data[pos : pos+nameLen]
+		if !utf8.Valid(nameBytes) {
+			continue
+		}
+		name := sanitizeNickname(string(nameBytes))
+		if len([]byte(name)) != nameLen {
+			continue
+		}
+		hasLetter := false
+		hasCJK := false
+		for _, ch := range name {
+			if unicode.IsLetter(ch) {
+				hasLetter = true
+			}
+			if isCJKNameRune(ch) {
+				hasCJK = true
+			}
+		}
+		if hasLetter && (len([]rune(name)) >= 2 || hasCJK) {
+			if acceptsName != nil && !acceptsName(name) {
+				continue
+			}
+			return actorBinding{actorID: actorID, name: name}, true
+		}
+	}
+	return actorBinding{}, false
+}
+
+func isCJKNameRune(ch rune) bool {
+	return ch >= 0x4E00 && ch <= 0x9FFF ||
+		ch >= 0xAC00 && ch <= 0xD7AF ||
+		ch >= 0x3400 && ch <= 0x4DBF ||
+		ch >= 0x20000 && ch <= 0x2A6DF ||
+		ch >= 0x1100 && ch <= 0x11FF
+}
+
+const localIdentityTailSize = 96
+
+// localIdentityScanner preserves enough bytes to decode an identity record
+// split across two TCP payloads. Complete records may be seen more than once
+// through the overlap; the engine deduplicates them by entity id and name.
+type localIdentityScanner struct {
+	tail []byte
+}
+
+func (s *localIdentityScanner) feed(chunk []byte, acceptsName func(string) bool) (actorBinding, bool) {
+	found, foundOK := scanLocalIdentity(chunk, acceptsName)
+	if !foundOK && len(s.tail) > 0 && len(chunk) > 0 {
+		prefixLen := len(chunk)
+		if prefixLen > localIdentityTailSize {
+			prefixLen = localIdentityTailSize
+		}
+		var bridge [localIdentityTailSize * 2]byte
+		n := copy(bridge[:], s.tail)
+		n += copy(bridge[n:], chunk[:prefixLen])
+		found, foundOK = scanLocalIdentity(bridge[:n], acceptsName)
+	}
+
+	keep := len(chunk)
+	if keep > localIdentityTailSize {
+		keep = localIdentityTailSize
+	}
+	s.tail = append(s.tail[:0], chunk[len(chunk)-keep:]...)
+	return found, foundOK
+}
+
+func (s *localIdentityScanner) reset() { s.tail = nil }
 
 // streamReassembler splits the captured byte stream on the 06 00 36 message
 // delimiter and extracts actor_id→name bindings from each complete message.

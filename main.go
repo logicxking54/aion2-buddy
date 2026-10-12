@@ -16,7 +16,6 @@ func main() {
 	// Create an instance of the app structure
 	app := NewApp()
 	captureBinding := NewCapture()
-	modBinding := NewMod()
 
 	// Create application with options
 	err := wails.Run(&options.App{
@@ -32,12 +31,13 @@ func main() {
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
 			captureBinding.setContext(ctx)
-			modBinding.setContext(ctx)
+		},
+		OnShutdown: func(ctx context.Context) {
+			captureBinding.StopCapture()
 		},
 		Bind: []interface{}{
 			app,
 			captureBinding,
-			modBinding,
 		},
 	})
 

@@ -7,7 +7,7 @@ const { t, locale } = useI18n()
 // Build-time app version (from wails.json's info.productVersion, injected by Vite).
 const appVersion = __APP_VERSION__
 
-// Changelog — newest first. Each change carries both languages so it follows the
+// Changelog — newest first. Each change carries all supported languages so it follows the
 // active locale. Add a new release object at the TOP for each version bump.
 interface Change {
   en: string
@@ -19,6 +19,35 @@ interface Release {
   changes: Change[]
 }
 const releases: Release[] = [
+  {
+    version: '1.2.19',
+    changes: [
+      { en: 'New "Game boost" switch in Ping Maker: while Aion2.exe is running it is kept at High priority and pinned to the performance cores (P-cores on hybrid Intel CPUs; the affinity is left alone on CPUs without efficiency cores). Switching it off restores the process to what it had before.', th: 'เพิ่มสวิตช์ "บูสต์เกม" ใน Ping Maker: ขณะ Aion2.exe เปิดอยู่ แอพจะคง priority High และล็อกเกมไว้บน P-core (CPU ที่ไม่มี E-core จะไม่เปลี่ยน affinity) ปิดสวิตช์แล้วโปรเซสจะกลับเป็นค่าเดิม', zh: 'Ping Maker 新增「遊戲加速」開關：Aion2.exe 執行時會維持高優先權並固定在效能核心（混合架構 Intel CPU 的 P-core；沒有效率核心的 CPU 不變更親和性）。關閉後會還原先前的設定。' },
+      { en: 'The packet engine now runs its capture thread at raised priority, and the app itself one class above normal, so a busy game, browser or Discord cannot delay packet re-injection.', th: 'ตัวดักแพ็กเก็ตรัน thread ที่ priority สูงขึ้น และตัวแอพเองสูงกว่าปกติหนึ่งขั้น เพื่อไม่ให้เกม เบราว์เซอร์ หรือ Discord ที่ยุ่งอยู่หน่วงการส่งแพ็กเก็ตกลับ', zh: '封包引擎的擷取執行緒改以較高優先權執行，應用程式本身也提高一級，避免忙碌的遊戲、瀏覽器或 Discord 延遲封包重新注入。' },
+    ],
+  },
+  {
+    version: '1.2.18',
+    changes: [
+      { en: 'Automatic caster selection now requires a full match to the configured character name, preventing Maliwan from being confused with Mali茉莉 or another player.', th: 'การเลือก caster อัตโนมัติต้องตรงกับชื่อตัวละครที่ตั้งไว้ทั้งชื่อ ป้องกันการสับสนระหว่าง Maliwan กับ Mali茉莉 หรือผู้เล่นคนอื่น', zh: '自動選擇施法者現在必須完整符合設定的角色名稱，避免將 Maliwan 誤認為 Mali茉莉 或其他玩家。' },
+      { en: 'With a character name configured, Ping Maker no longer guesses your identity from the first skill cast or a pause in combat. Manual caster selection remains available when the name record was missed.', th: 'เมื่อตั้งชื่อตัวละครไว้ Ping Maker จะไม่เดาว่าใครเป็นตัวคุณจากคนที่ออกสกิลก่อนหรือช่วงหยุดต่อสู้ หากพลาดข้อมูลชื่อ ยังเลือก caster เองได้', zh: '設定角色名稱後，Ping Maker 不再根據首次施法或戰鬥間隔猜測你的身分。若錯過名稱資料，仍可手動選擇施法者。' },
+      { en: 'Changing the configured name clears the previous caster selection. Identity scanning now skips unrelated names and continues looking for the configured character in the same packet.', th: 'เมื่อเปลี่ยนชื่อตัวละคร ระบบจะล้าง caster ที่เลือกไว้เดิม และการอ่านข้อมูลจะข้ามชื่อที่ไม่ตรงเพื่อค้นหาตัวละครที่ตั้งไว้ต่อในแพ็กเก็ตเดียวกัน', zh: '變更設定的角色名稱時會清除先前選取的施法者。身分掃描現在會略過不相符的名稱，繼續在同一封包中尋找設定的角色。' },
+    ],
+  },
+  {
+    version: '1.2.17',
+    changes: [
+      { en: 'The app now opens directly into Ping Maker, with skill settings, caster selection, language selection, Start/Stop, and the capture log on one screen.', th: 'แอพเปิดเข้า Ping Maker โดยตรง รวมค่าสกิล การเลือก caster ภาษา ปุ่มเริ่ม/หยุด และ log ไว้ในหน้าเดียว', zh: '應用程式現在直接開啟 Ping Maker，技能設定、施法者選擇、語言選擇、啟動／停止與擷取紀錄都集中於同一畫面。' },
+      { en: 'Removed Latency Lab, Rotation Lab, Macro Optimizer, Mod, Packet Inspector, and the separate Settings page from the app, along with their backend bindings.', th: 'นำ Latency Lab, Rotation Lab, Macro Optimizer, Mod, Packet Inspector และหน้าตั้งค่าแยกออกจากแอพ พร้อมถอดคำสั่ง backend ของฟีเจอร์เหล่านี้', zh: '移除應用程式中的 Latency Lab、Rotation Lab、Macro Optimizer、Mod、Packet Inspector 與獨立設定頁面，以及這些功能的後端繫結。' },
+      { en: 'Existing Ping Maker skill and speed settings are preserved. External Speeder macros and installed game mods are not changed.', th: 'ค่าสกิลและความเร็วเดิมของ Ping Maker ยังคงอยู่ โดยไม่เปลี่ยนมาโคร Speeder ภายนอกหรือม็อดที่ติดตั้งในเกม', zh: '保留既有的 Ping Maker 技能與速度設定，不變更外部 Speeder 巨集或已安裝的遊戲模組。' },
+    ],
+  },
+  {
+    version: '1.2.16',
+    changes: [
+      { en: '"Disable Skill Effects" supports game builds 97 and 98.', th: '"ปิดเอฟเฟกต์สกิล" รองรับเกมเวอร์ชัน 97 และ 98', zh: '「關閉技能特效」支援遊戲版本 97 與 98。' },
+    ],
+  },
   {
     version: '1.2.15',
     changes: [

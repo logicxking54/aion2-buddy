@@ -3,42 +3,9 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { config, loadConfig, saveConfig } from '../config'
 import { clearLogs, errorMsg, initCapture, logs, running } from '../captureController'
-import { setCasterMask, setAnimMask } from '../projects/pingmaker/capture'
 
 const { t } = useI18n()
 const logBox = ref<HTMLElement | null>(null)
-
-// ── FPS mask ────────────────────────────────────────────────────────────
-// When on, the engine rewrites every OTHER player's cast skill_id to a no-VFX
-// "Dodge" skill for higher FPS in crowded fights. Hidden for now; kept here so the
-// toggle still wires up if re-enabled.
-const DODGE_SKILL_ID = 15000100 // one fixed Dodge id for everyone (near-invisible)
-
-function pushMask() {
-  if (!running.value) return // engine isn't capturing; nothing to mask
-  setCasterMask(config.casterMask, 0, DODGE_SKILL_ID).catch(() => {})
-}
-watch([() => config.casterMask, running], pushMask, { immediate: true })
-
-function toggleMask() {
-  config.casterMask = !config.casterMask
-  saveConfig()
-}
-
-// ── Disable skill anims (except mine) ───────────────────────────────────
-// The toggle UI lives in the Mod menu now; this watcher stays here because
-// CaptureBar is mounted under every menu, so it owns pushing `config.animMask`
-// into the engine whenever the flag or capture state changes. When on, the engine
-// rewrites every OTHER caster's cast of a skill NOT in your edit list to a tiny
-// no-animation skill (a quick dash). Your own casts and edit-list skills keep
-// their animation. Needs your caster locked (via the caster picker).
-const ANIM_MASK_SKILL_ID = 17000101 // tiny no-animation skill written over masked casts
-
-function pushAnimMask() {
-  if (!running.value) return // engine isn't capturing; nothing to mask
-  setAnimMask(config.animMask, ANIM_MASK_SKILL_ID).catch(() => {})
-}
-watch([() => config.animMask, running], pushAnimMask, { immediate: true })
 
 // ── Resizable panel height ──────────────────────────────────────────────
 const panelHeight = ref(300)
@@ -102,15 +69,6 @@ onUnmounted(endDrag)
 
     <div class="flex min-h-0 flex-1 flex-col px-4 pb-3">
       <div class="flex flex-wrap items-center gap-3">
-        <!-- FPS mask toggle hidden for now (logic kept intact; re-enable by removing v-if="false"). -->
-        <button
-          v-if="config.devMode && false"
-          type="button"
-          @click="toggleMask"
-          :title="t('ping.fpsMaskHint')"
-          class="rounded-md px-3 py-1 text-xs font-semibold transition"
-          :class="config.casterMask ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/30' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
-        >{{ config.casterMask ? '● ' + t('ping.fpsMaskOn') : t('ping.fpsMask') }}</button>
         <button
           type="button"
           @click="clearLogs"

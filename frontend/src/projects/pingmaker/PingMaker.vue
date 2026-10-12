@@ -4,9 +4,32 @@ import { useI18n } from 'vue-i18n'
 import { classes, skills, skillColor, type Skill, type SkillClass } from './skills'
 import errorImage from '../../assets/images/skill-error.svg'
 import { config, loadConfig, saveConfig } from '../../config'
-import { actCasters, pickCaster } from '../../captureController'
+import { actCasters, gameBoost, localCaster, pickCaster } from '../../captureController'
 
 const { t } = useI18n()
+
+// Game boost: the backend keeps Aion2.exe at High priority on the performance
+// cores while it runs; the toggle is persisted and the status line reports what
+// was actually applied (or why it could not be).
+function setBoost(on: boolean) {
+  config.gameBoost = on
+  saveConfig()
+}
+const boostStatus = computed(() => {
+  if (!config.gameBoost) return t('ping.gameBoostOff')
+  const s = gameBoost.value
+  if (s.applied) return t('ping.gameBoostApplied', { detail: s.detail })
+  if (s.detail) return t('ping.gameBoostFailed', { detail: s.detail })
+  return t('ping.gameBoostWaiting')
+})
+const casterChoices = computed(() => {
+  const choices = [...actCasters.value]
+  const manual = Number(config.casterRecord)
+  if (manual > 0 && !choices.some((caster) => caster.id === manual)) {
+    choices.unshift({ id: manual, name: '' })
+  }
+  return choices
+})
 
 function classLabel(c: string) {
   const key = `ping.classes.${c}`
@@ -124,7 +147,7 @@ onMounted(async () => {
 
 <template>
   <div class="mx-auto flex h-full max-w-6xl flex-col gap-4">
-    <div class="grid min-h-0 flex-1 grid-cols-2 gap-4">
+    <div class="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-2">
     <!-- ============ LEFT: skill picker ============ -->
     <div class="flex min-h-0 flex-col rounded-xl border border-white/5 bg-ink-700 p-5">
       <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400">{{ t('ping.skills') }}</h2>
@@ -215,22 +238,51 @@ onMounted(async () => {
         <span class="text-[11px] text-slate-500">%</span>
       </div>
 
-      <!-- Caster picker: only shown when >1 player cast your configured skill (same
-           class in the party). Pick your own name so only your casts get edited. -->
+      <!-- Auto identity is authoritative; observed ACT casters are manual fallbacks. -->
       <div
-        v-if="actCasters.length > 1"
-        class="mt-2 flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-200"
+        class="mt-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold"
+        :class="config.casterRecord > 0
+          ? 'border-amber-400/30 bg-amber-400/10 text-amber-200'
+          : localCaster.id > 0
+            ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200'
+            : 'border-white/5 bg-ink-800 text-slate-400'"
       >
-        <span>{{ t('ping.whoAmI') }}</span>
+        <span>{{ t('ping.casterMode') }}</span>
         <select
           :value="config.casterRecord"
           @change="pickCaster(Number(($event.target as HTMLSelectElement).value))"
           class="ml-auto rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-sm text-white outline-none focus:border-accent/60"
         >
-          <option :value="0" disabled>{{ t('ping.pickName') }}</option>
-          <option v-for="c in actCasters" :key="c.id" :value="c.id">{{ c.name || ('ID:' + c.id) }}</option>
+          <option :value="0">
+            {{ localCaster.id > 0
+              ? t('ping.casterAuto', { name: localCaster.name, id: localCaster.id })
+              : t('ping.casterDetecting') }}
+          </option>
+          <option v-for="c in casterChoices" :key="c.id" :value="c.id">
+            {{ t('ping.casterManual', { name: c.name || ('ID:' + c.id) }) }}
+          </option>
         </select>
       </div>
+
+      <!-- Game boost: High priority + performance-core affinity for Aion2.exe. -->
+      <label
+        :title="t('ping.gameBoostHint')"
+        class="mt-2 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold"
+        :class="config.gameBoost && gameBoost.applied
+          ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200'
+          : config.gameBoost && gameBoost.detail
+            ? 'border-amber-400/30 bg-amber-400/10 text-amber-200'
+            : 'border-white/5 bg-ink-800 text-slate-400'"
+      >
+        <input
+          type="checkbox"
+          :checked="config.gameBoost"
+          @change="setBoost(($event.target as HTMLInputElement).checked)"
+          class="h-4 w-4 accent-accent"
+        />
+        <span>{{ t('ping.gameBoost') }}</span>
+        <span class="ml-auto truncate text-[11px] font-normal">{{ boostStatus }}</span>
+      </label>
 
       <!-- Search added skills -->
       <input
@@ -306,5 +358,6 @@ onMounted(async () => {
       </ul>
     </div>
     </div>
+
   </div>
 </template>

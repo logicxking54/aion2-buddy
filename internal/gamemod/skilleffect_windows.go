@@ -54,6 +54,12 @@ type skillEffectRelease struct {
 // builds may share one zip only when their extracted FX are byte-identical —
 // verify with the hash-diff in tools/effect-mod/README.md, never assume.
 var fallbackBuilds = map[string]skillEffectRelease{
+	// 97 was a large player-FX patch; 98 left those assets byte-identical, so the
+	// two builds share the pak cooked from 97.
+	"98": {URL: "https://static.logicxking.com/5c9f29af-5866-4613-8fad-de299ef8e687.zip", SHA256: "8c69a3ed91b33f979be9049e32556ae38a61828c509ec641c46d663f38ec7add", SizeMB: 67},
+	"97": {URL: "https://static.logicxking.com/5c9f29af-5866-4613-8fad-de299ef8e687.zip", SHA256: "8c69a3ed91b33f979be9049e32556ae38a61828c509ec641c46d663f38ec7add", SizeMB: 67},
+	// 95 left player FX byte-identical to 94.
+	"95": {URL: "https://static.logicxking.com/eaaf6de1-a4dc-4665-92a2-a94f15843787.zip", SHA256: "d7fd22627932548e26ae5cd14e7e85fa9add07fdaea748d8ae8c23a3c3ecf6ff", SizeMB: 63},
 	// 94 added Gladiator hit FX, dropped two Sorcerer ones and rewrote 102 more
 	// across Arena buffs, Chanter and Assassin, so it needed its own pak.
 	"94": {URL: "https://static.logicxking.com/eaaf6de1-a4dc-4665-92a2-a94f15843787.zip", SHA256: "d7fd22627932548e26ae5cd14e7e85fa9add07fdaea748d8ae8c23a3c3ecf6ff", SizeMB: 63},

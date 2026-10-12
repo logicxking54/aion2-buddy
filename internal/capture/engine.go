@@ -168,39 +168,42 @@ type Engine struct {
 	cfgFirstBytes map[byte]struct{}
 	lookup        map[uint32]skillCfg
 	// Full catalog (all known skills) — used to log every cast, not just configured ones.
-	catIDs        map[uint32]struct{}
-	catFirstBytes map[byte]struct{}
-	idToName      map[uint32]string
-	recentUsed    map[uint64]int64 // dedupe "used" log lines per (skill, action tick)
-	lastActAt     map[uint32]int64 // last 0x02 ACT time per skill id (guards 0x00 buff casts)
-	tracker       *entityTracker   // character-name filter ("only my skills")
-	reasm         streamReassembler
-	curPorts      map[int]struct{} // server/proxy ports of the active handle (for direction)
-	lastReqByConn map[int]int64    // client port -> last outbound time (ns), for RTT
-	lastReqPkt    map[int][]byte   // client port -> last outbound payload, for request decoding
-	autoMode      bool             // compute bonus from ping instead of per-skill field
-	autoBase      float64          // packet add at 0ms ping
-	autoPerMs     float64          // extra packet add per ms of ping
-	pingEWMA      float64          // smoothed ping (ms); written only by packet goroutine
-	pingHasValue  bool
-	lastPingEmit  int64
-	inspect       bool              // packet inspector enabled
-	inspectAll    bool              // true = dump every inbound packet; false = only skill casts
-	inspectCount  int64             // emitted-message counter (capped)
-	decode        bool              // print all decoded fields for each cast
-	maskOn        bool              // FPS mask: rewrite other players' cast skill_id to Dodge
-	maskKeep      uint64            // your caster (entity key) left untouched; 0 = not locked yet
-	maskDodge     uint32            // skill_id written over masked casts (a no-VFX Dodge id)
-	animMaskOn    bool              // "disable skill anims except mine": rewrite non-edit-list, non-own casts
-	animMaskID    uint32            // skill_id written over anim-masked casts (a tiny no-anim skill)
-	statSpeedOn     bool            // EXPERIMENT: overwrite combat-speed stat (0x011a) in inbound stat-recalc packets
-	statSpeedTarget uint32          // target value for stat 0x011a; multiplier = (10000+target)/10000
-	casterFilter  uint64            // engine-level caster filter: only this caster is processed; 0 = all
-	actorNames    map[uint64]string // learned actor_id -> character name (for the caster picker)
-	actLog        []uint64          // recent configured-skill ACT casters (picker options), oldest first
-	actSeen       map[uint64]int64  // caster -> last configured-skill ACT time (ns), for expiry
-	actSig        string            // signature of the last emitted act-casters list (dedupe)
-	running       bool
+	catIDs          map[uint32]struct{}
+	catFirstBytes   map[byte]struct{}
+	idToName        map[uint32]string
+	recentUsed      map[uint64]int64 // dedupe "used" log lines per (skill, action tick)
+	lastActAt       map[uint32]int64 // last 0x02 ACT time per skill id (guards 0x00 buff casts)
+	tracker         *entityTracker   // character-name filter ("only my skills")
+	reasm           streamReassembler
+	identity        localIdentityScanner // authoritative 33 36 local-player identity across TCP splits
+	curPorts        map[int]struct{}     // server/proxy ports of the active handle (for direction)
+	lastReqByConn   map[int]int64        // client port -> last outbound time (ns), for RTT
+	lastReqPkt      map[int][]byte       // client port -> last outbound payload, for request decoding
+	autoMode        bool                 // compute bonus from ping instead of per-skill field
+	autoBase        float64              // packet add at 0ms ping
+	autoPerMs       float64              // extra packet add per ms of ping
+	pingEWMA        float64              // smoothed ping (ms); written only by packet goroutine
+	pingHasValue    bool
+	lastPingEmit    int64
+	inspect         bool              // packet inspector enabled
+	inspectAll      bool              // true = dump every inbound packet; false = only skill casts
+	inspectCount    int64             // emitted-message counter (capped)
+	decode          bool              // print all decoded fields for each cast
+	maskOn          bool              // FPS mask: rewrite other players' cast skill_id to Dodge
+	maskKeep        uint64            // your caster (entity key) left untouched; 0 = not locked yet
+	maskDodge       uint32            // skill_id written over masked casts (a no-VFX Dodge id)
+	animMaskOn      bool              // "disable skill anims except mine": rewrite non-edit-list, non-own casts
+	animMaskID      uint32            // skill_id written over anim-masked casts (a tiny no-anim skill)
+	autoCaster      uint64            // local caster from the authoritative 33 36 self-identity record
+	autoCasterName  string            // local character name carried by the same identity record
+	autoProvisional bool              // true when first configured ACT supplied a best-effort fallback
+	autoAmbiguous   bool              // multiple configured casters observed without trusted identity
+	casterFilter    uint64            // manual caster override; 0 = use autoCaster
+	actorNames      map[uint64]string // learned actor_id -> character name (for the caster picker)
+	actLog          []uint64          // recent configured-skill ACT casters (picker options), oldest first
+	actSeen         map[uint64]int64  // caster -> last configured-skill ACT time (ns), for expiry
+	actSig          string            // signature of the last emitted act-casters list (dedupe)
+	running         bool
 
 	stop       chan struct{}
 	ports      *portTracker
@@ -219,7 +222,7 @@ type Engine struct {
 
 // NewEngine creates an engine that emits UI events through emit.
 func NewEngine(emit func(event string, payload any)) *Engine {
-	return &Engine{
+	e := &Engine{
 		emit:          emit,
 		cfgIDs:        map[uint32]struct{}{},
 		cfgFirstBytes: map[byte]struct{}{},
@@ -239,6 +242,7 @@ func NewEngine(emit func(event string, payload any)) *Engine {
 		autoPerMs:     80,
 		animMaskID:    17000101, // default no-animation skill for the anim mask
 	}
+	return e
 }
 
 const inspectCap = 500 // stop emitting after this many messages until re-enabled
@@ -316,15 +320,14 @@ func (e *Engine) SetAuto(enabled bool, base, perMs float64) {
 	}
 }
 
-// SetCasterMask toggles the FPS-saver mask. When on AND keepCaster is known
-// (non-zero — i.e. we've seen your ACT and locked your caster), every inbound
+// SetCasterMask toggles the FPS-saver mask. When on AND the local caster is known,
+// every inbound
 // cast from a DIFFERENT caster has its main skill_id overwritten with dodgeID (a
 // near-invisible Dodge skill) so the client renders nothing heavy for other
 // players → higher FPS in crowded fights. It's a same-length in-place edit, so
 // the TCP stream never desyncs; your own caster is never touched, and nothing
-// happens until keepCaster is set. The frontend re-calls this whenever the
-// toggle or your auto-detected caster changes, so the logging is de-duped to the
-// transitions that matter.
+// happens until a caster is known. If keepCaster is zero, the packet path uses
+// the effective auto/manual caster identity.
 func (e *Engine) SetCasterMask(on bool, keepCaster uint64, dodgeID uint32) {
 	e.mu.Lock()
 	wasOn, hadKeep := e.maskOn, e.maskKeep
@@ -342,14 +345,14 @@ func (e *Engine) SetCasterMask(on bool, keepCaster uint64, dodgeID uint32) {
 		// detected after the mask was armed and waiting.
 		e.emitLog(fmt.Sprintf("FPS mask ON — hiding other players (keep caster %d, others -> Dodge %d)", keepCaster, dodge))
 	case on && keepCaster == 0 && !wasOn:
-		e.emitLog("FPS mask ARMED — waiting for your caster (cast a skill so we lock onto you)…")
+		e.emitLog("FPS mask ARMED — waiting for local-player identity…")
 	case !on && wasOn:
 		e.emitLog("FPS mask OFF")
 	}
 }
 
 // SetAnimMask toggles the "disable skill animations (except mine)" mod. When on
-// AND your caster is locked (casterFilter != 0), every inbound cast that is from a
+// AND your caster is known, every inbound cast that is from a
 // DIFFERENT caster AND is NOT one of your configured (edit-list) skills has its
 // main skill_id overwritten with replaceID — a tiny no-animation skill — so the
 // client renders a quick dash instead of that cast. Your own casts and edit-list
@@ -369,57 +372,51 @@ func (e *Engine) SetAnimMask(on bool, replaceID uint32) {
 
 	switch {
 	case on && !was:
-		e.emitLog(fmt.Sprintf("Skill-anim mask ON — others' non-edit-list casts -> skill %d (your casts + edit-list kept; lock your caster first)", id))
+		e.emitLog(fmt.Sprintf("Skill-anim mask ON — others' non-edit-list casts -> skill %d (your casts + edit-list kept)", id))
 	case !on && was:
 		e.emitLog("Skill-anim mask OFF")
 	}
 }
 
-// SetStatSpeed toggles an EXPERIMENT: overwrite the combat-speed stat (id 0x011a)
-// inside inbound stat-recalc packets (the LZ4 bundle the server sends on
-// equip/zone/login). Combat-speed multiplier = (10000+stat)/10000, so
-// target=20000 → 3.0x. The edit patches the LZ4 block literals in place
-// (length-preserving, no TCP resync); a value stored as an LZ4 back-reference is
-// left untouched (logged). The server is authoritative, so this tests whether the
-// client honours a modified resting combat-speed (movement + all-skill animation
-// rate), which the per-cast speed edit does not reach. target==0 keeps the
-// current target.
-func (e *Engine) SetStatSpeed(on bool, target uint32) {
-	e.mu.Lock()
-	e.statSpeedOn = on
-	if target != 0 {
-		e.statSpeedTarget = target
-	}
-	t := e.statSpeedTarget
-	e.mu.Unlock()
-	if on {
-		e.emitLog(fmt.Sprintf("Stat-speed edit ON — combat-speed stat 0x011a -> %d (%.4fx) on equip/zone", t, float64(10000+t)/10000))
-	} else {
-		e.emitLog("Stat-speed edit OFF")
-	}
-}
-
-// SetCasterFilter sets the engine-level caster filter. When id != 0, only casts
-// from that caster (entity key) are processed — every other caster is ignored
-// entirely: no log line, no cast event, and no combat-speed edit. id == 0 clears
-// the filter (process all casters). The caster id is entered manually in the UI
-// (no auto-detect), and the frontend re-calls this whenever the field changes, so
-// this stays quiet — no logging on every update.
+// SetCasterFilter sets the manual caster override. A non-zero id always wins over
+// the authoritative auto-detected local caster; zero returns to auto mode.
 func (e *Engine) SetCasterFilter(id uint64) {
 	e.mu.Lock()
 	e.casterFilter = id
 	e.mu.Unlock()
 }
 
+func (e *Engine) effectiveCasterLocked() uint64 {
+	if e.casterFilter != 0 {
+		return e.casterFilter
+	}
+	return e.autoCaster
+}
+
+func (e *Engine) effectiveCaster() uint64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.effectiveCasterLocked()
+}
+
+func casterMatches(effective, observed uint64) bool {
+	return effective != 0 && (observed == 0 || observed == effective)
+}
+
 const (
 	actLogMax = 20 // max distinct ACT casters kept as picker options
 
-	// A caster drops out of the picker once it hasn't cast one of your skills for
-	// this long. Entity keys are re-assigned when you re-enter an instance, so
-	// without expiry the previous run's (now dead) key stays a valid option and the
-	// UI's sticky selection keeps pointing at it. Leaving and re-entering always
-	// takes longer than this, so the stale key is gone by the time you're back in.
+	// A caster drops out of the manual-fallback picker after this much silence.
+	// Entity keys are re-assigned when entering a new instance, so stale choices
+	// must not accumulate indefinitely.
 	actCasterTTL = 90 * time.Second
+
+	// A previously unseen configured-skill caster after a quiet period marks a
+	// new instance generation when the authoritative identity record was missed.
+	// This is deliberately shorter than the picker TTL: the picker retains useful
+	// manual choices, while automatic identity must hand off on the first cast of
+	// a new dungeon run.
+	actCasterGenerationGap = 12 * time.Second
 
 	// Window a cast could plausibly fall in after one of our own outbound packets.
 	// Only TestReplaySessionPairing uses these now — see the note there on why
@@ -429,11 +426,17 @@ const (
 )
 
 // actCaster is one recent caster of a configured-skill ACT cast, with its learned
-// character name (empty until a name binding is seen — inside instances the cast
-// entity keys don't match the name bindings, so this is usually empty there).
+// character name. Other players are often unnamed because their display-name
+// records can use a different entity-id namespace inside instances.
 type actCaster struct {
 	ID   uint64 `json:"id"`
 	Name string `json:"name"`
+}
+
+type localCasterEvent struct {
+	ID                    uint64 `json:"id"`
+	Name                  string `json:"name"`
+	ManualOverrideCleared bool   `json:"manualOverrideCleared"`
 }
 
 // resetCasterState drops everything learned about who is casting, so a new capture
@@ -442,19 +445,187 @@ type actCaster struct {
 func (e *Engine) resetCasterState() {
 	e.actLog = nil
 	e.actSig = ""
+	e.autoCaster = 0
+	e.autoCasterName = ""
+	e.autoProvisional = false
+	e.autoAmbiguous = false
 	e.casterFilter = 0
 	e.actorNames = map[uint64]string{}
 	e.actSeen = map[uint64]int64{}
 }
 
+// acceptLocalIdentity makes the 33 36 self record the automatic caster source.
+// A manual override remains authoritative. When the server assigns a new local
+// entity id on an instance transition, any override tied to the old instance is
+// cleared and the picker options are reset immediately.
+func (e *Engine) acceptLocalIdentity(binding actorBinding) uint64 {
+	if binding.actorID == 0 || binding.name == "" || !e.tracker.acceptsName(binding.name) {
+		return e.effectiveCaster()
+	}
+	matchedName, trackerLocked := e.tracker.onBinding(binding.actorID, binding.name)
+
+	e.mu.Lock()
+	previousID := e.autoCaster
+	wasProvisional := e.autoProvisional
+	wasAmbiguous := e.autoAmbiguous
+	changed := previousID != binding.actorID || e.autoCasterName != binding.name || wasProvisional || wasAmbiguous
+	overrideCleared := false
+	if previousID != 0 && previousID != binding.actorID {
+		if e.casterFilter != 0 {
+			e.casterFilter = 0
+			overrideCleared = true
+		}
+		e.actLog = nil
+		e.actSeen = map[uint64]int64{}
+		e.actSig = ""
+		e.actorNames = map[uint64]string{}
+	}
+	e.autoCaster = binding.actorID
+	e.autoCasterName = binding.name
+	e.autoProvisional = false
+	e.autoAmbiguous = false
+	e.actorNames[binding.actorID] = binding.name
+	if changed {
+		e.actSig = "" // re-emit picker names if this caster was already observed
+	}
+	effective := e.effectiveCasterLocked()
+	e.mu.Unlock()
+
+	if trackerLocked {
+		e.fire("capture:character", matchedName)
+	}
+	if changed {
+		e.emitLog(fmt.Sprintf("Local caster detected: %s (ID:%d)", binding.name, binding.actorID))
+		e.fire("capture:local-caster", localCasterEvent{
+			ID:                    binding.actorID,
+			Name:                  binding.name,
+			ManualOverrideCleared: overrideCleared,
+		})
+		e.emitActCasters()
+	}
+	return effective
+}
+
+// observeConfiguredCaster is the last-resort identity path for capture started
+// mid-instance, after both the 33 36 self record and actor-name binding have
+// already passed. The first configured ACT becomes a provisional caster and is
+// processed immediately. If a second caster of the configured skills appears,
+// the fallback becomes ambiguous and fails closed until trusted identity arrives
+// or the user selects the manual dropdown.
+//
+// The authoritative identity packet is not present on every repeated instance
+// entry. A previously unseen caster after a quiet period therefore starts a new
+// generation: stale ids, picker options, and the old name-derived key are
+// discarded before this cast is processed.
+func (e *Engine) observeConfiguredCaster(caster uint64, now int64) uint64 {
+	// A configured name must be verified by a name record, never inferred from
+	// skill choice or a quiet gap. Manual selection remains available meanwhile.
+	if caster == 0 || e.tracker.isConfigured() {
+		return e.effectiveCaster()
+	}
+
+	e.mu.Lock()
+	latestSeen := int64(0)
+	for _, seen := range e.actSeen {
+		if seen > latestSeen {
+			latestSeen = seen
+		}
+	}
+	_, seenThisCaster := e.actSeen[caster]
+	newGeneration := !seenThisCaster && latestSeen != 0 && now-latestSeen > int64(actCasterGenerationGap)
+	overrideCleared := false
+	if newGeneration {
+		if e.casterFilter != 0 {
+			e.casterFilter = 0
+			overrideCleared = true
+		}
+		name := e.actorNames[caster]
+		e.actLog = nil
+		e.actSeen = map[uint64]int64{}
+		e.actSig = ""
+		e.actorNames = map[uint64]string{}
+		if name != "" {
+			e.actorNames[caster] = name
+		}
+		e.autoCaster = caster
+		e.autoCasterName = name
+		e.autoProvisional = true
+		e.autoAmbiguous = false
+		effective := e.effectiveCasterLocked()
+		e.mu.Unlock()
+
+		e.tracker.clearKey()
+		e.emitLog(fmt.Sprintf("New caster generation detected: ID:%d", caster))
+		e.fire("capture:local-caster", localCasterEvent{
+			ID:                    caster,
+			Name:                  name,
+			ManualOverrideCleared: overrideCleared,
+		})
+		e.emitActCasters()
+		return effective
+	}
+
+	if e.casterFilter != 0 {
+		effective := e.casterFilter
+		e.mu.Unlock()
+		return effective
+	}
+
+	changed := false
+	ambiguous := false
+	switch {
+	case e.autoCaster == 0 && !e.autoAmbiguous:
+		e.autoCaster = caster
+		e.autoCasterName = e.actorNames[caster]
+		e.autoProvisional = true
+		changed = true
+	case e.autoProvisional && e.autoCaster != caster:
+		e.autoCaster = 0
+		e.autoCasterName = ""
+		e.autoProvisional = false
+		e.autoAmbiguous = true
+		changed = true
+		ambiguous = true
+	}
+	effective := e.effectiveCasterLocked()
+	name := e.autoCasterName
+	e.mu.Unlock()
+
+	if changed {
+		if ambiguous {
+			e.emitLog("Multiple matching casters detected — select yours from the caster dropdown")
+			e.fire("capture:local-caster", localCasterEvent{})
+		} else {
+			e.emitLog(fmt.Sprintf("Local caster fallback: ID:%d (waiting for trusted identity)", caster))
+			e.fire("capture:local-caster", localCasterEvent{ID: caster, Name: name})
+		}
+	}
+	return effective
+}
+
+// learnActorBinding records picker names and promotes an exact configured-name
+// match to trusted local identity. This path remains unambiguous with another
+// player of the same class because it compares the character name, not skills.
+func (e *Engine) learnActorBinding(binding actorBinding) {
+	if binding.actorID == 0 || binding.name == "" {
+		return
+	}
+	e.mu.Lock()
+	e.actorNames[binding.actorID] = binding.name
+	e.mu.Unlock()
+	if name, locked := e.tracker.onBinding(binding.actorID, binding.name); locked {
+		e.acceptLocalIdentity(actorBinding{actorID: binding.actorID, name: name})
+		e.fire("capture:character", name)
+	}
+}
+
 // recordActCaster accumulates the DISTINCT casters of your configured skills (in
 // first-seen order) and emits them as "capture:act-casters" for the picker.
 //
-// Options expire after actCasterTTL of silence. That's what lets a new instance
-// re-lock on its own: entity keys are re-assigned on every entry, and while the
-// previous run's key was still listed the UI's sticky selection had no reason to
-// let go of it. Pruning happens here rather than on a timer because it only has to
-// be correct at the moment the list is emitted.
+// Options expire after actCasterTTL of silence so the manual fallback does not
+// retain dead entity ids across instance transitions. observeConfiguredCaster
+// handles the faster automatic generation handoff before this function records
+// the current cast.
 //
 // resetCasterState clears everything on a session change. Dedupes the emitted list
 // so it stays quiet. Runs only on the single packet goroutine, so none of this
@@ -483,6 +654,10 @@ func (e *Engine) recordActCaster(caster uint64, now int64) {
 	}
 	e.actLog = kept
 
+	e.emitActCasters()
+}
+
+func (e *Engine) emitActCasters() {
 	list := make([]actCaster, 0, len(e.actLog))
 	for _, id := range e.actLog {
 		list = append(list, actCaster{ID: id, Name: e.actorNames[id]})
@@ -622,9 +797,9 @@ func (e *Engine) updatePing(ms int) {
 	}
 }
 
-// SetCharacterNames restricts capture to the given character name(s); empty
-// list = no filter (show every cast). When set, only casts owned by your
-// character are logged/modified, once its entity key is learned from the stream.
+// SetCharacterNames restricts automatic caster selection to these exact names.
+// An empty list restores the unconfigured automatic fallback. Changing the
+// configured names invalidates previous automatic and manual selections.
 func (e *Engine) SetCharacterNames(names []string) {
 	clean := make([]string, 0, len(names))
 	for _, n := range names {
@@ -633,11 +808,20 @@ func (e *Engine) SetCharacterNames(names []string) {
 		}
 	}
 	e.tracker.updateNames(clean)
+	e.mu.Lock()
+	overrideCleared := e.casterFilter != 0
+	e.autoCaster = 0
+	e.autoCasterName = ""
+	e.autoProvisional = false
+	e.autoAmbiguous = false
+	e.casterFilter = 0
+	e.mu.Unlock()
+	e.fire("capture:local-caster", localCasterEvent{ManualOverrideCleared: overrideCleared})
 	e.fire("capture:character", "")
 	if len(clean) > 0 {
 		e.emitLog("Detecting character: " + strings.Join(clean, ", ") + " — cast a skill or zone to lock on")
 	} else {
-		e.emitLog("Character filter cleared (showing all casts)")
+		e.emitLog("Character name filter cleared (automatic caster selection)")
 	}
 }
 
@@ -849,11 +1033,14 @@ func (e *Engine) Start(skills []SkillSpeed) error {
 	e.pingHasValue = false
 	e.lastPingEmit = 0
 	e.reasm.reset()
+	e.identity.reset()
 	e.resetCasterState()
 	atomic.StoreUint64(&e.modified, 0)
 	e.mu.Unlock()
 
 	e.SetConfig(skills)
+	e.fire("capture:local-caster", localCasterEvent{})
+	e.fire("capture:act-casters", []actCaster{})
 	auditPath := ""
 	if captureDiskLog { // only touch the on-disk audit log when explicitly enabled
 		if path, err := e.resetHellfireAudit(); err == nil {
@@ -993,6 +1180,14 @@ func (e *Engine) interceptLoop() {
 
 // runHandle reads packets until the handle is closed (stop or port change).
 func (e *Engine) runHandle(h handle) {
+	// This goroutine is the inline hop for every game packet, so any scheduling
+	// delay here lands directly on the player's latency. Pin it to one OS thread
+	// at raised priority so a busy game, browser or Discord cannot preempt it.
+	unpin, err := pinCaptureThread()
+	defer unpin()
+	if err != nil {
+		e.emitLog("Capture thread priority unchanged: " + err.Error())
+	}
 	buf := make([]byte, 65535)
 	for {
 		n, addr, err := h.recv(buf)
@@ -1008,6 +1203,15 @@ func (e *Engine) runHandle(h handle) {
 // the legacy wire-literal heuristic if a problem ever shows up in the field.
 var lz4DecompressEdit = true
 
+func (e *Engine) learnCompressedIdentity(clean []byte) {
+	if identity, found := scanLocalIdentity(clean, e.tracker.acceptsName); found {
+		e.acceptLocalIdentity(identity)
+	}
+	for _, binding := range scanActorNameBindings(clean) {
+		e.learnActorBinding(binding)
+	}
+}
+
 // editCompressedCasts handles party-load LZ4-compressed inbound packets. It
 // decompresses the block (with literal provenance), edits each configured cast's
 // attack-speed in the CLEAN stream — where the strict id-anchored parser is
@@ -1022,7 +1226,7 @@ func (e *Engine) editCompressedCasts(
 	raw, payload []byte, payloadOffset int,
 	scanIDs map[uint32]struct{}, scanFB map[byte]struct{},
 	lookup map[uint32]skillCfg, idToName map[uint32]string,
-	casterFilter uint64, filtering, autoMode bool, autoBase, autoPerMs float64,
+	filtering, autoMode bool, autoBase, autoPerMs float64,
 	animMaskOn bool, animMaskID uint32,
 ) (handled, edited bool) {
 	blockStart, origLen, ok := parseLZ4Frame(payload)
@@ -1034,6 +1238,8 @@ func (e *Engine) editCompressedCasts(
 	if !dok {
 		return handled, false // malformed → leave the packet untouched
 	}
+	e.learnCompressedIdentity(clean)
+	casterFilter := e.effectiveCaster()
 
 	hits := findAllSkillIDs(clean, scanIDs, scanFB, 0)
 	for i := range hits {
@@ -1041,17 +1247,19 @@ func (e *Engine) editCompressedCasts(
 		if hh.offset+6 > len(clean) {
 			continue
 		}
-		if !(hh.prefixOK && clean[hh.offset+5] == 0x02) {
+		is02 := hh.prefixOK && clean[hh.offset+5] == 0x02
+		if !is02 {
 			continue // only 0x02 ACT casts carry the position+speed block
 		}
 		caster := extractEntityKey(clean, hh.offset)
-		// Caster auto-detect: count ONLY casts of YOUR configured skills (the ones
-		// that become an ACT edit) — not every catalog skill — so a party member's
-		// casts can't thrash the lock onto the wrong caster. Runs before the filters
-		// so it still sees every caster of your own skill.
+		// Track configured-skill ACT casters for the picker and the provisional
+		// instance-generation fallback when an identity record was missed.
 		if caster != 0 {
 			if _, conf := lookup[hh.id]; conf {
-				e.recordActCaster(caster, time.Now().UnixNano())
+				now := time.Now().UnixNano()
+				casterFilter = e.observeConfiguredCaster(caster, now)
+				e.recordActCaster(caster, now)
+				filtering = e.tracker.hasAnyKeys()
 			}
 		}
 
@@ -1086,18 +1294,21 @@ func (e *Engine) editCompressedCasts(
 		}
 
 		cfg, isConfigured := lookup[hh.id]
+		name := idToName[hh.id]
+		if name == "" && isConfigured {
+			name = cfg.name
+		}
+		if name == "" {
+			name = fmt.Sprintf("ID:%d", hh.id)
+		}
 		if !isConfigured {
 			continue
 		}
 		if filtering && (caster == 0 || !e.tracker.isMine(caster)) {
 			continue
 		}
-		if casterFilter != 0 && caster != 0 && caster != casterFilter {
+		if !casterMatches(casterFilter, caster) {
 			continue
-		}
-		name := idToName[hh.id]
-		if name == "" {
-			name = cfg.name
 		}
 		if skipSpeedEditForStability(name, hh.id) {
 			continue
@@ -1174,72 +1385,6 @@ func (e *Engine) editCompressedCasts(
 	return handled, edited
 }
 
-// findCombatSpeedStat locates the combat-speed stat (id 0x011a) inside a
-// decompressed stat-recalc table — a contiguous run of <id u16 LE><value i32 LE>
-// records with ids in 0x0100..0x01ff. Returns the offset of the 4 value bytes,
-// or -1. Verified against a live equip/unequip capture: stat 0x011a is the
-// combat-speed bonus, and the combat-speed multiplier = (10000+value)/10000
-// (matches the per-cast speed field exactly).
-func findCombatSpeedStat(d []byte) int {
-	const target = 0x011a
-	for i := 0; i+12 <= len(d); i++ {
-		if uint16(d[i])|uint16(d[i+1])<<8 != target {
-			continue
-		}
-		// Guard against a coincidental "1a 01": the following 6-byte record's id
-		// must also be a 0x01xx stat, i.e. we're really inside the stat table.
-		if nextID := uint16(d[i+6]) | uint16(d[i+7])<<8; nextID < 0x0100 || nextID > 0x01ff {
-			continue
-		}
-		if v := int32(binary.LittleEndian.Uint32(d[i+2 : i+6])); v > 0 && v < 1_000_000 {
-			return i + 2
-		}
-	}
-	return -1
-}
-
-// editStatSpeed overwrites the combat-speed stat (0x011a) in an inbound
-// LZ4-compressed stat-recalc packet with target, patching the block literals in
-// place (length-preserving, so the TCP segment stays in sync — no seq/ack
-// rewrite). handled=true when the payload was an LZ4 frame; edited=true when a
-// byte was changed. A value stored as an LZ4 back-reference is unreachable and
-// left as-is (logged). Mirrors editCompressedCasts' literal-patch approach.
-func (e *Engine) editStatSpeed(raw, payload []byte, payloadOffset int, target uint32) (handled, edited bool) {
-	blockStart, origLen, ok := parseLZ4Frame(payload)
-	if !ok {
-		return false, false
-	}
-	handled = true
-	clean, litSrc, dok := lz4DecompressTrace(payload[blockStart:], origLen)
-	if !dok {
-		return handled, false
-	}
-	off := findCombatSpeedStat(clean)
-	if off < 0 {
-		return handled, false
-	}
-	blk := make([]int, 4)
-	for k := 0; k < 4; k++ {
-		if off+k >= len(litSrc) || litSrc[off+k] < 0 {
-			e.emitLog("Stat-speed: stat 0x011a is an LZ4 back-ref this packet (unreachable) — skipped")
-			return handled, false
-		}
-		blk[k] = litSrc[off+k]
-	}
-	old := binary.LittleEndian.Uint32(clean[off : off+4])
-	if old == target {
-		return handled, false
-	}
-	var b [4]byte
-	binary.LittleEndian.PutUint32(b[:], target)
-	for k := 0; k < 4; k++ {
-		raw[payloadOffset+blockStart+blk[k]] = b[k]
-	}
-	e.countModify()
-	e.emitLog(fmt.Sprintf("Stat-speed: combat-speed 0x011a %d -> %d (%.4fx)", old, target, float64(10000+target)/10000))
-	return handled, true
-}
-
 func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	modified := false
 	defer func() {
@@ -1276,9 +1421,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	maskDodge := e.maskDodge
 	animMaskOn := e.animMaskOn
 	animMaskID := e.animMaskID
-	casterFilter := e.casterFilter
-	statSpeedOn := e.statSpeedOn
-	statSpeedTarget := e.statSpeedTarget
 	sessionCh := e.sessionCh
 	e.mu.Unlock()
 
@@ -1295,14 +1437,13 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		e.recordPacket(sessionCh, dir, raw, payload)
 	}
 
-	if len(scanIDs) == 0 {
-		return
-	}
-
 	// Outbound (client → server): timestamp skill requests so we can report how
 	// long the server takes to respond (RTT). Best-effort — the request format
 	// isn't documented, so we just scan for the skill ID.
 	if dstIsServer && !srcIsServer {
+		if len(scanIDs) == 0 {
+			return
+		}
 		now := time.Now().UnixNano()
 		e.lastReqByConn[srcPort] = now                          // last outbound time on this connection
 		e.lastReqPkt[srcPort] = append([]byte(nil), payload...) // copy, for pairing/decoding
@@ -1350,17 +1491,38 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	}
 
 	// Inbound (server → client): the modifiable / loggable stream.
+	_, _, compressedPayload := parseLZ4Frame(payload)
+	if !compressedPayload {
+		if identity, found := e.identity.feed(payload, e.tracker.acceptsName); found {
+			e.acceptLocalIdentity(identity)
+		}
+	} else if !lz4DecompressEdit || maskOn || len(scanIDs) == 0 {
+		// The normal compressed editor learns identity from its already-decompressed
+		// buffer. If that path is bypassed, perform the read-only scan here.
+		if blockStart, origLen, framed := parseLZ4Frame(payload); framed {
+			if clean, _, ok := lz4DecompressTrace(payload[blockStart:], origLen); ok {
+				if identity, found := scanLocalIdentity(clean, e.tracker.acceptsName); found {
+					e.acceptLocalIdentity(identity)
+				}
+			}
+		}
+	}
+	if len(scanIDs) == 0 {
+		return
+	}
 	if len(payload) < 40 {
 		return
 	}
 
 	// Entity learning: feed the stream and lock onto the player's character key.
-	for _, b := range e.reasm.feed(payload) {
-		e.actorNames[b.actorID] = b.name // learn EVERY player's name, for the caster picker
-		if name, locked := e.tracker.onBinding(b.actorID, b.name); locked {
-			e.emitLog("Locked onto " + name)
-			e.fire("capture:character", name)
+	if !compressedPayload {
+		for _, b := range e.reasm.feed(payload) {
+			e.learnActorBinding(b)
 		}
+	}
+	casterFilter := e.effectiveCaster()
+	if casterFilter != 0 {
+		maskKeep = casterFilter
 	}
 
 	// Decode toggle: frame this payload into messages and log the combat ones
@@ -1381,19 +1543,15 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	// compressed frame properly — decompress, edit speed in the clean stream, and
 	// patch the block literals in place (length-preserving). Skip the mask path
 	// (it edits other casters' ids and still uses the legacy route).
-	filtering := e.tracker.isConfigured()
-	// EXPERIMENT: overwrite the combat-speed stat (0x011a) in the server's
-	// LZ4 stat-recalc bundle (equip/zone). Runs before the cast editor since that
-	// returns on any LZ4 frame; the stat packet carries no casts so the two don't
-	// collide. Independent of maskOn.
-	if statSpeedOn {
-		if _, ed := e.editStatSpeed(raw, payload, payloadOffset, statSpeedTarget); ed {
-			modified = true
-		}
-	}
+	// An exact-name filter is authoritative only after its actor binding has been
+	// observed. Before then, let the effective caster path below use 33 36 or the
+	// provisional first-ACT fallback; otherwise starting capture mid-instance
+	// would discard the very first cast while waiting for a name packet that may
+	// already have passed.
+	filtering := e.tracker.hasAnyKeys()
 	if lz4DecompressEdit && !maskOn {
 		if handled, ed := e.editCompressedCasts(raw, payload, payloadOffset,
-			scanIDs, scanFB, lookup, idToName, casterFilter, filtering, autoMode, autoBase, autoPerMs,
+			scanIDs, scanFB, lookup, idToName, filtering, autoMode, autoBase, autoPerMs,
 			animMaskOn, animMaskID); handled {
 			if ed {
 				modified = true
@@ -1444,15 +1602,16 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		}
 		caster := extractEntityKey(payload, hh.offset)
 
-		// Caster auto-detect: count ONLY casts of YOUR configured skills (the ones
-		// that become an ACT edit) — not every catalog skill — so a party member's
-		// casts can't thrash the lock onto the wrong caster. When one caster exceeds
-		// the threshold it becomes the active filter (replacing any current value)
-		// and the UI is notified. Runs before the filters below so it still sees
-		// every caster of your own skill.
+		// Track configured-skill ACT casters for the picker and the provisional
+		// instance-generation fallback when an identity record was missed.
 		if is02 && caster != 0 {
 			if _, conf := lookup[hh.id]; conf {
+				casterFilter = e.observeConfiguredCaster(caster, now)
 				e.recordActCaster(caster, now)
+				filtering = e.tracker.hasAnyKeys()
+				if casterFilter != 0 {
+					maskKeep = casterFilter
+				}
 			}
 		}
 
@@ -1498,17 +1657,22 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 				continue // not our character
 			}
 		}
+		if casterFilter == 0 {
+			if sessionCh != nil && is02 {
+				e.recordCast(sessionCh, fmt.Sprintf(`"id":%d,"caster":%d,"result":"waiting-local-identity"`, hh.id, caster))
+			}
+			continue
+		}
 
-		// Engine-level caster filter (manual). The caster id is entered by the user
-		// in the UI — there is no auto-detect, so the engine emits no re-lock or
-		// observed-caster signal. When a filter is set, ignore every other caster: no
+		// Effective caster filter: manual override first, otherwise the authoritative
+		// 33 36 local identity. When known, ignore every other caster: no
 		// log line, no cast event, no combat-speed edit. Only drop when the caster is
 		// KNOWN (non-zero) and confidently different — extractEntityKey occasionally
 		// fails to read a clean key on rapidly coalesced casts (spamming several ACTs
 		// into one TCP segment), returning 0. Dropping those would silently skip the
 		// speed edit on some of your own spam casts, so a 0 (unknown) caster is given
 		// the benefit of the doubt and processed.
-		if casterFilter != 0 && caster != 0 && caster != casterFilter {
+		if !casterMatches(casterFilter, caster) {
 			if sessionCh != nil && is02 {
 				e.recordCast(sessionCh, fmt.Sprintf(`"id":%d,"caster":%d,"result":"dropped-caster-filter"`, hh.id, caster))
 			}
@@ -1526,7 +1690,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 		if name == "" {
 			name = fmt.Sprintf("ID:%d", hh.id)
 		}
-
 		// Ping = your cast request (last data outbound on this connection) → your
 		// own cast confirmation (the 0x02 ACT that carries combat speed). Measured
 		// once per packet; the request is consumed so the next cast pairs with its own.

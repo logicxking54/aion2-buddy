@@ -8,11 +8,124 @@ build needs its own pak. Never map a new build to an old pak.
 Since the manifest change, a game patch needs **no app release**: re-cook, upload the
 zip, add one entry to `skilleffect-manifest.json`, re-upload the manifest. Done.
 
+## Selective local experiments
+
+### Build 122 Sorcerer timing trial (local only)
+
+`C:\aion_fx\cast-window-v122-20261010\endure-test-v1` contains the separate
+`pakchunk99998-Windows_1_P` trio and `manage-experiment.ps1` (`Status`, `Install`,
+`Disable`). This is NOT an effect-disabling mod. It reduces one `EndureEnd`
+activation time by 10% in six Sorcerer Design assets for five skills. Input-unlock
+semantics and gameplay improvement remain unverified; do not claim 10% faster casts.
+The probe, per-asset reports, readback evidence, and install receipts are in that
+scratch tree. Original archives and the selected Speeder macro are not replaced.
+
+On a game update, close Aion2 and run the helper with `-Action Disable` before
+testing the new build. It moves only the hash-verified experimental trio out of
+Paks. Its build check prevents a new installation on another build, but cannot
+automatically remove an already-installed trial. Never carry this trial forward,
+combine it into the default effect mod, or publish it through the manifest without
+fresh review and explicit authorization.
+
+### Selective effect audit
+
+The existing default disabler remains unchanged. For a separate conservative trial,
+the disabler also has an audit/build mode. Do not publish an experimental selection
+through the global manifest without an explicit request and in-game validation.
+
+```powershell
+# Capture package-store imports, then extract FX and Act to a NEW scratch tree.
+# Retoc filters are substring matches; these may also include nested FX/Act folders.
+retoc.exe -a <AES> list --path --package --store <game-paks> > <scratch>/package-store.txt
+retoc.exe -a <AES> to-legacy --filter FX/ --no-shaders --no-script-objects --version UE5_3 <game-paks> <scratch>/original
+retoc.exe -a <AES> to-legacy --filter Act/ --no-shaders --no-script-objects --version UE5_3 <game-paks> <scratch>/original
+
+dotnet build tools/effect-mod/disabler -c Release
+disabler.exe --audit <scratch>/original <scratch>/package-store.txt <scratch>/selection.json
+disabler.exe --selective <usmap> <scratch>/selection.json <scratch>/modified <scratch>/build-report.json
+
+# Unit checks; optional arguments additionally test real extracted Niagara fixtures.
+dotnet run --project tools/effect-mod/disabler-tests -c Release
+dotnet run --project tools/effect-mod/disabler-tests -c Release -- <scratch>/original <usmap>
+```
+
+Run the two audits (and the builds that follow) **one after another, never two at
+once on the same tree**: the disabler opens assets without share-read, so a second
+concurrent reader fails hundreds of headers with "being used by another process" and
+the audit then approves nothing. Extract from a hard-linked view of the official
+archives only (no `pakchunk9999*` overrides) so an installed trial pak cannot leak
+into the baseline. The bash/python versions of the batch runner and cook preparation
+used for builds 112–122 live beside each scratch tree (`build-root-only.sh`,
+`prepare_cook.py`); the PowerShell originals need PowerShell 7, which this machine
+does not have.
+
+The audit considers a narrow player/cosmetic path allowlist and rejects transitive
+references from protected boss, NPC, map, environment, healer, status, and shared
+module roots. It combines package-store hard imports with `/Game` paths in extracted
+name tables. This is NOT a complete dynamic-reference graph or a proof that every
+boss mechanic stays visible. Never blanket-disable a folder merely because its name
+sounds decorative. Cleric, Chanter, Templar, shared status cues, and environment
+particles are intentionally held out of this initial policy.
+Both extracted `.uasset` and `.umap` headers are scanned; map soft references must
+not silently disappear merely because maps use a different extension.
+
+The selective builder verifies baseline hashes, rejects all RawExport assets and
+unsupported bulk sidecars, requires an exact unchanged serialization roundtrip,
+then disables emitter handles and reopens the output to verify every handle is off.
+Skipped assets have explicit reasons in the build report; `errors=0` in the legacy
+tool is NOT evidence of full VFX coverage. Candidate output and roundtrip scratch
+must be new directories separate from the input. Only the `modified` tree, never
+the `modified-roundtrip` tree, is eligible for cooking.
+The JSON report must also remain outside the source, output, and roundtrip trees.
+
+Before installing, compare the cooked directory index with exactly the report's
+`written` packages, convert it back and recheck the disabled handles. Verify the
+installed game build has not changed, keep the existing override as a complete
+three-file backup, and close Aion2 before replacing any live pak files. Do not
+reuse a trial after a game update or claim FPS improvement without measurement.
+For cooked-pak readback, use a separate read-only view of the matching official
+archives plus copies of the three test pak files. Global files alone can leave
+external imports unresolved as `UnknownPackage`/`UnknownExport`, even if extraction
+succeeds. Compare complete resolved name/import tables and export payloads, not
+just enable flags. Do not ship the dependency archives. Check extraction totals:
+retoc can return exit code zero even when all asset conversions failed.
+
+### Player-only FX actions
+
+When a particle is shared with NPCs, do not modify that shared particle. A separate
+mode can gate visual task links in exclusively player-called `FX/Act/Player` assets:
+
+```powershell
+disabler.exe --audit-actions <scratch>/original <scratch>/package-store.txt <scratch>/action-selection.json
+disabler.exe --player-actions <usmap> <scratch>/action-selection.json <scratch>/actions <scratch>/action-report.json
+```
+
+This mode retains external package callers and common-directory support-class roots
+in the reference graph. Unknown callers and protected transitive references block
+selection. Only a single `AionAct` root explicitly marked `Fx` is accepted. Only
+local `AionActTask_Particle`/`AionActTask_Streak` links with an explicit `bEnabled`
+are disabled; other task types, timings, and references remain unchanged.
+
+The root-only reader uses UAssetAPI `SkipParsingExports` and
+`SkipPreloadDependencyLoading`, then parses the one FX root. All ancillary exports
+remain opaque. Full task parsing caused fatal `FSoftObjectPath` stack overflows on
+build 110; the two known Gladiator Skill032 inputs remain quarantined. Do not retry
+them or depend on `catch(Exception)` to recover a native stack overflow. Use bounded
+child processes and stop on incomplete reports. A child-only heap limit controls
+memory use but is not a stack-overflow fix.
+
+Both unchanged serialization and restoration of only the edited flags must reproduce
+the exact original `.uasset`/`.uexp` pair. Cook only completed `written` outputs
+confirmed against the reviewed audit, never incomplete batches or check directories.
+Opaque export readback avoids unsupported schemas during final validation, but must
+also compare resolved names and imports. These checks do not replace an in-game
+boss-mechanics visibility test.
+
 ## Toolchain
 
 | Thing | Where |
 |---|---|
-| retoc | `F:\retoc_cli-x86_64-pc-windows-msvc\retoc.exe` (+ `oo2core_9_win64.dll` beside it) |
+| retoc | `G:\tools\retoc-0.1.5\bin\retoc.exe` (+ `oo2core_9_win64.dll` beside it) |
 | usmap | `D:\Users\Singh\Downloads\AION2-5.3.2.0-1.0.0.0.usmap` (UE5_3) |
 | AES | `0x06038EF544B6007614F8574F1B7C2A3F0D565F74CDCC1B366B4EA1A17B97CBFF` |
 | disabler | `tools/effect-mod/disabler` (net8.0 + UAssetAPI 1.1.0) |

@@ -22,6 +22,8 @@ class Program
 {
     static int Main(string[] args)
     {
+        if (args.Length > 0 && (args[0] == "--audit" || args[0] == "--selective" || args[0] == "--audit-actions" || args[0] == "--player-actions"))
+            return SelectiveBuild.Run(args);
         if (args.Length < 2)
         {
             Console.WriteLine("usage: disabler <usmap> <dir> [-v]");

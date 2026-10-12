@@ -47,6 +47,8 @@ const (
 var perfCvars = []string{
 	"; --- DLSS Frame Generation (RTX 40xx+; needs Windows HAGS enabled) ---",
 	"r.Streamline.DLSSG.Enable=1",
+	"; --- lower input latency (do not queue the game thread one frame ahead) ---",
+	"r.OneFrameThreadLag=0",
 	"; --- Lumen GI / reflections off (single biggest raster win in UE5) ---",
 	"r.DynamicGlobalIlluminationMethod=0",
 	"r.ReflectionMethod=0",
@@ -61,8 +63,12 @@ var perfCvars = []string{
 	"; --- remaining FX cheaper (1, not 0 - 0 can cull boss telegraphs) ---",
 	"fx.Niagara.QualityLevel=1",
 	"fx.MaxCPUParticlesPerEmitter=200",
-	"; --- crowd detail (NCSoft scalability group) ---",
-	"sg.MassiveGameQuality=0",
+	// This NCSoft group counts the other way from the engine's sg.* groups: the
+	// game's own "high" preset writes 0 while its "lowest" preset writes 4, so 4
+	// is the strongest crowd optimisation, not the richest crowd. An earlier
+	// version wrote 0 here, which switched that optimisation off in raids.
+	"; --- crowd optimisation (NCSoft scalability group; 4 is the most aggressive) ---",
+	"sg.MassiveGameQuality=4",
 	"; --- post-processing off ---",
 	"r.MotionBlurQuality=0",
 	"r.BloomQuality=0",

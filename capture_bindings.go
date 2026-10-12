@@ -17,11 +17,12 @@ import (
 type Capture struct {
 	ctx    context.Context
 	engine *capture.Engine
+	boost  *capture.GameBoost
 }
 
 // NewCapture wires the engine's event emitter to runtime.EventsEmit.
 func NewCapture() *Capture {
-	c := &Capture{}
+	c := &Capture{boost: capture.NewGameBoost()}
 	c.engine = capture.NewEngine(func(event string, payload any) {
 		if c.ctx != nil {
 			runtime.EventsEmit(c.ctx, event, payload)
@@ -32,18 +33,38 @@ func NewCapture() *Capture {
 
 func (c *Capture) setContext(ctx context.Context) {
 	c.ctx = ctx
+	_ = capture.BoostOwnProcess() // best effort; the packet loop is latency-critical
 	go c.watchGame()
 }
 
-// watchGame polls for the Aion 2 process and pushes a game:status event to the
-// UI so the sidebar can show whether the game is detected.
+// watchGame polls for the Aion 2 process, pushes a game:status event to the UI
+// so it can show whether the game is detected, and lets the game boost follow
+// the process (apply on launch, forget on exit). game:boost is only sent when
+// the boost state actually changes.
 func (c *Capture) watchGame() {
+	var last capture.GameBoostState
 	for {
 		if c.ctx != nil {
-			runtime.EventsEmit(c.ctx, "game:status", capture.GameRunning())
+			pid := capture.GamePID()
+			runtime.EventsEmit(c.ctx, "game:status", pid != 0)
+			if st := c.boost.Tick(pid); st != last {
+				last = st
+				runtime.EventsEmit(c.ctx, "game:boost", st)
+			}
 		}
 		time.Sleep(3 * time.Second)
 	}
+}
+
+// SetGameBoost turns the game-process boost on or off: High priority and
+// performance-core affinity for Aion2.exe while it runs. Off restores whatever
+// the game had before this app changed it.
+func (c *Capture) SetGameBoost(enabled bool) capture.GameBoostState {
+	st := c.boost.SetEnabled(enabled, capture.GamePID())
+	if c.ctx != nil {
+		runtime.EventsEmit(c.ctx, "game:boost", st)
+	}
+	return st
 }
 
 // StartCapture begins interception with the given per-skill combat-speed config.
@@ -73,57 +94,10 @@ func (c *Capture) SetCharacterNames(names []string) {
 	c.engine.SetCharacterNames(names)
 }
 
-// SetAuto toggles auto-mode and sets the ping→add curve (add = base + perMs*ping).
-func (c *Capture) SetAuto(enabled bool, base float64, perMs float64) {
-	c.engine.SetAuto(enabled, base, perMs)
-}
-
-// SetInspect toggles the packet inspector (all=true dumps every inbound packet,
-// else only skill-cast packets).
-func (c *Capture) SetInspect(on bool, all bool) {
-	c.engine.SetInspect(on, all)
-}
-
-// SetDecode toggles full per-cast field decoding to the log.
-func (c *Capture) SetDecode(on bool) {
-	c.engine.SetDecode(on)
-}
-
-// SetSessionRecord toggles raw-packet recording of the whole session to a JSONL
-// file (for offline analysis). Returns the file path when starting.
-func (c *Capture) SetSessionRecord(on bool) (string, error) {
-	return c.engine.SetSessionRecord(on)
-}
-
-// SetCasterMask toggles the FPS-saver mask: the engine rewrites every OTHER
-// player's cast skill_id to a no-VFX Dodge skill so the client renders nothing
-// heavy for them. keepCaster is your detected caster (0 = not yet known → no-op);
-// dodgeID is the Dodge skill id to write.
-func (c *Capture) SetCasterMask(on bool, keepCaster uint64, dodgeID uint32) {
-	c.engine.SetCasterMask(on, keepCaster, dodgeID)
-}
-
-// SetAnimMask toggles the "disable skill animations (except mine)" mod: when on
-// and your caster is locked, every OTHER caster's cast of a non-edit-list skill has
-// its skill_id rewritten to replaceID (a tiny no-animation skill). Your own casts
-// and edit-list skills keep their animation. replaceID == 0 keeps the current id.
-func (c *Capture) SetAnimMask(on bool, replaceID uint32) {
-	c.engine.SetAnimMask(on, replaceID)
-}
-
-// SetCasterFilter sets the engine-level caster filter: when id != 0, only that
-// caster's casts are processed (logged + speed-modified) and every other caster
-// is ignored. id == 0 clears it. The frontend pushes the (auto/manual) field value.
+// SetCasterFilter sets the manual caster override. id == 0 returns to the
+// backend's authoritative auto-detected local caster.
 func (c *Capture) SetCasterFilter(id uint64) {
 	c.engine.SetCasterFilter(id)
-}
-
-// SetStatSpeed toggles the experimental combat-speed stat edit: when on, the
-// server's stat-recalc packet (sent on equip/zone) has its combat-speed stat
-// (0x011a) overwritten so the multiplier = (10000+target)/10000. target == 0
-// keeps the current value. See engine.SetStatSpeed.
-func (c *Capture) SetStatSpeed(on bool, target uint32) {
-	c.engine.SetStatSpeed(on, target)
 }
 
 // IsCapturing reports whether capture is currently running.

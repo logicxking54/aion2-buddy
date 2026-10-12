@@ -64,10 +64,30 @@ func (t *entityTracker) isMine(ek uint64) bool {
 	return t.hasKey && ek == t.key
 }
 
+// clearKey forgets the instance-scoped entity id while preserving the
+// configured character names. The next identity/name record can lock it again.
+func (t *entityTracker) clearKey() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.key = 0
+	t.hasKey = false
+	t.keyName = ""
+}
+
 func (t *entityTracker) isConfigured() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return len(t.names) > 0
+}
+
+func (t *entityTracker) acceptsName(name string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.names) == 0 {
+		return true
+	}
+	_, ok := t.names[strings.ToLower(strings.TrimSpace(name))]
+	return ok
 }
 
 func (t *entityTracker) hasAnyKeys() bool {

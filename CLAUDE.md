@@ -13,6 +13,14 @@ Menus live under `frontend/src/projects/`, registered in `registry.ts`:
 - **Ping Maker** — the core feature. WinDivert pulls the game's TCP packets out of the
   stack and rewrites the combat-speed field of configured skills so casts play faster.
   **Requires admin** (kernel driver).
+  - **Game boost** toggle (`internal/capture/boost*.go`, `Capture.SetGameBoost`): while
+    `Aion2.exe` runs, keep it at High priority and pinned to the performance cores
+    (P-cores via `GetLogicalProcessorInformationEx` efficiency classes; a homogeneous CPU
+    is left alone). Off restores the process. The capture goroutine is also locked to an
+    OS thread at raised priority and the app runs ABOVE_NORMAL — the engine is inline on
+    every game packet, so scheduling delay there is player latency. End-to-end check:
+    `BOOSTTEST=1 go test ./internal/capture -run Manual -v` (uses a throwaway `ping`
+    process, not the game).
 - **Mod** (`internal/gamemod`) — reversible toggles:
   - File/system tweaks (remove intro video, TCP latency, NIC tuning) — writes game files
     and system settings, with backups for rollback.
@@ -94,11 +102,12 @@ Most `internal/capture` files are `//go:build windows`.
 - **Edits MUST be same-length** so TCP sequence numbers stay valid. Never change a packet's
   length. *Do not re-attempt variable-length "reseg"* — it was built, validated offline,
   and reverted; see `memory/aion2-reseg-attempt.md`.
-- **Caster filter** (engine `casterFilter`): only the selected caster's casts are edited or
-  logged. Picker options come from `recordActCaster` and **expire after 90s of silence**,
-  which is what makes re-entering an instance re-lock by itself (entity keys are
-  re-assigned on entry, and a stale key used to hold the sticky selection forever).
-  Runtime-only; never persisted.
+- **Caster identity/filter**: the server's `33 36` self-identity record is the primary
+  source. An exact configured-character-name binding is a second trusted source, including
+  same-class parties. If capture starts mid-instance after both records passed, the first
+  configured ACT is used provisionally and is edited immediately; observing a second
+  matching caster clears that provisional lock and requires the dropdown. `casterFilter`
+  is a runtime-only manual override and always wins. Picker options expire after 90s.
 
 ### Measured dead end — don't rebuild this
 

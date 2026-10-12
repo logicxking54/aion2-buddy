@@ -14,11 +14,9 @@ export interface AppConfig {
   language: 'th' | 'en' | 'zh'
   character: string
   defaultSpeed: number
-  casterRecord: number // auto-detected caster-filter entity key — RUNTIME ONLY, never persisted (changes every session)
+  casterRecord: number // manual caster override — RUNTIME ONLY; 0 uses authoritative auto identity
   panelHeight: number
-  devMode: boolean // show developer-only menus (e.g. Packet Inspector)
-  casterMask: boolean // FPS mask: rewrite other players' casts to Dodge (dev-only)
-  animMask: boolean // disable skill anims (except mine): rewrite others' non-edit-list casts to a no-anim skill
+  gameBoost: boolean // keep Aion2.exe at High priority on the performance cores while it runs
   rows: SavedRow[]
 }
 
@@ -35,9 +33,7 @@ export const config = reactive<AppConfig>({
   defaultSpeed: 250,
   casterRecord: 0,
   panelHeight: 300,
-  devMode: false,
-  casterMask: false,
-  animMask: false,
+  gameBoost: false,
   rows: [],
 })
 
@@ -49,6 +45,8 @@ function appBackend(): AppBackend | undefined {
   return (window as any)?.go?.main?.App
 }
 
+// Retain old measurements/settings only for rollback; never expose them as live state.
+let legacyConfig: Record<string, unknown> = {}
 let ready = false
 let loadPromise: Promise<void> | null = null
 
@@ -65,7 +63,16 @@ async function doLoad(): Promise<void> {
       const raw = await a.LoadConfig()
       if (raw) {
         const data = JSON.parse(raw)
-        if (data && typeof data === 'object') Object.assign(config, data)
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          const { casterRecord: _drop, ...saved } = data
+          legacyConfig = saved
+          const current = Object.fromEntries(
+            Object.keys(config)
+              .filter((key) => key !== 'casterRecord' && Object.prototype.hasOwnProperty.call(saved, key))
+              .map((key) => [key, saved[key]]),
+          )
+          Object.assign(config, current)
+        }
         config.casterRecord = 0 // never restore a persisted caster; it's per-session
       }
     } catch {
@@ -84,8 +91,8 @@ export function saveConfig(): void {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     const a = appBackend()
-    // casterRecord is auto-detected per session — strip it so it's never persisted.
+    // casterRecord is a per-instance manual override — strip it so it is never persisted.
     const { casterRecord: _drop, ...persist } = config
-    if (a) a.SaveConfig(JSON.stringify(persist)).catch(() => {})
+    if (a) a.SaveConfig(JSON.stringify({ ...legacyConfig, ...persist })).catch(() => {})
   }, 300)
 }

@@ -14,6 +14,24 @@ export namespace capture {
 	        this.ids = source["ids"];
 	    }
 	}
+	export class GameBoostState {
+	    enabled: boolean;
+	    applied: boolean;
+	    pid: number;
+	    detail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GameBoostState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.applied = source["applied"];
+	        this.pid = source["pid"];
+	        this.detail = source["detail"];
+	    }
+	}
 	export class SkillSpeed {
 	    name: string;
 	    ids: number[];
@@ -34,63 +52,6 @@ export namespace capture {
 	        this.speedPct = source["speedPct"];
 	        this.break = source["break"];
 	        this.override = source["override"];
-	    }
-	}
-
-}
-
-export namespace gamemod {
-	
-	export class SkillEffectInfo {
-	    found: boolean;
-	    paksDir: string;
-	    applied: boolean;
-	    gameVersion: string;
-	    supported: string;
-	    compatible: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new SkillEffectInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.found = source["found"];
-	        this.paksDir = source["paksDir"];
-	        this.applied = source["applied"];
-	        this.gameVersion = source["gameVersion"];
-	        this.supported = source["supported"];
-	        this.compatible = source["compatible"];
-	    }
-	}
-	export class Status {
-	    moviesDir: string;
-	    found: boolean;
-	    removed: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new Status(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.moviesDir = source["moviesDir"];
-	        this.found = source["found"];
-	        this.removed = source["removed"];
-	    }
-	}
-	export class TweakStatus {
-	    applied: boolean;
-	    detail: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new TweakStatus(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.applied = source["applied"];
-	        this.detail = source["detail"];
 	    }
 	}
 

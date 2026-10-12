@@ -10,3 +10,7 @@ frontend/dist
 # .NET build output for the effect-mod disabler dev tool
 tools/effect-mod/disabler/bin/
 tools/effect-mod/disabler/obj/
+
+# .NET build output for the disabler test runner
+tools/effect-mod/disabler-tests/bin/
+tools/effect-mod/disabler-tests/obj/
