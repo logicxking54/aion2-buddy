@@ -10,13 +10,16 @@ import {
   captureAvailable,
   EventsOn,
   isCapturing,
+  setAnimMask,
   setCasterFilter,
   setCatalog,
   setCharacterNames,
   setGameBoost,
+  setGameThreadIsolation,
   startCapture,
   stopCapture,
   updateCapture,
+  type AnimMaskState,
   type GameBoostState,
   type SkillSpeed,
 } from './projects/pingmaker/capture'
@@ -50,7 +53,19 @@ export interface LocalCaster {
 }
 export const localCaster = ref<LocalCaster>({ id: 0, name: '' })
 // What the backend last did to Aion2.exe for the game boost toggle.
-export const gameBoost = ref<GameBoostState>({ enabled: false, applied: false, pid: 0, detail: '' })
+export const gameBoost = ref<GameBoostState>({
+  enabled: false,
+  applied: false,
+  pid: 0,
+  detail: '',
+  isolated: false,
+  isolateDetail: '',
+})
+// Whether the "hide others' skill animations" rewrite is armed; it pauses while
+// the locked caster has not cast recently (a lock left over from the previous
+// instance) or no caster is known.
+const animMaskIdle: AnimMaskState = { armed: false, lockId: 0, reason: 'no-identity' }
+export const animMaskState = ref<AnimMaskState>({ ...animMaskIdle })
 export const effectiveCaster = computed(() => {
   const manual = Number(config.casterRecord)
   return Number.isFinite(manual) && manual > 0 ? manual : Number(localCaster.value.id) || 0
@@ -154,7 +169,15 @@ export async function initCapture() {
     if (s === 'idle') {
       localCaster.value = { id: 0, name: '' }
       actCasters.value = []
+      animMaskState.value = { ...animMaskIdle }
       config.casterRecord = 0
+    }
+  })
+  EventsOn('capture:anim-mask', (s: AnimMaskState) => {
+    animMaskState.value = {
+      armed: !!s?.armed,
+      lockId: Number(s?.lockId) || 0,
+      reason: s?.reason === 'armed' || s?.reason === 'idle' ? s.reason : 'no-identity',
     }
   })
   EventsOn('capture:ports', (p: number[]) => {
@@ -203,6 +226,8 @@ export async function initCapture() {
       applied: !!s?.applied,
       pid: Number(s?.pid) || 0,
       detail: String(s?.detail ?? ''),
+      isolated: !!s?.isolated,
+      isolateDetail: String(s?.isolateDetail ?? ''),
     }
   })
 
@@ -240,6 +265,16 @@ export async function initCapture() {
     },
   )
 
+  // Others' skill animations: a capture-engine packet rewrite, so it only does
+  // anything while capture runs; the engine keeps the flag across Start/Stop.
+  watch(
+    () => config.animMask,
+    (on) => {
+      if (captureAvailable()) setAnimMask(!!on).catch(() => {})
+    },
+    { immediate: true },
+  )
+
   // The game boost follows the saved toggle; the backend applies it whenever
   // Aion2.exe is running and restores the process when it is switched off.
   watch(
@@ -247,6 +282,21 @@ export async function initCapture() {
     (on) => {
       if (!captureAvailable()) return
       setGameBoost(!!on)
+        .then((s) => {
+          if (s) gameBoost.value = s
+        })
+        .catch(() => {})
+    },
+    { immediate: true },
+  )
+
+  // The isolation sub-switch follows its saved toggle the same way; the backend
+  // only pins threads while the boost itself is applied.
+  watch(
+    () => config.gameThreadIsolate,
+    (on) => {
+      if (!captureAvailable()) return
+      setGameThreadIsolation(!!on)
         .then((s) => {
           if (s) gameBoost.value = s
         })

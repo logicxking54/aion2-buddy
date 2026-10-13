@@ -4,6 +4,8 @@ import {capture} from '../models';
 
 export function IsCapturing():Promise<boolean>;
 
+export function SetAnimMask(arg1:boolean):Promise<void>;
+
 export function SetCasterFilter(arg1:number):Promise<void>;
 
 export function SetCatalog(arg1:Array<capture.CatalogEntry>):Promise<void>;
@@ -11,6 +13,8 @@ export function SetCatalog(arg1:Array<capture.CatalogEntry>):Promise<void>;
 export function SetCharacterNames(arg1:Array<string>):Promise<void>;
 
 export function SetGameBoost(arg1:boolean):Promise<capture.GameBoostState>;
+
+export function SetGameThreadIsolation(arg1:boolean):Promise<capture.GameBoostState>;
 
 export function StartCapture(arg1:Array<capture.SkillSpeed>):Promise<void>;
 

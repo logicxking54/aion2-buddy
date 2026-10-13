@@ -21,6 +21,16 @@ export interface GameBoostState {
   applied: boolean
   pid: number
   detail: string
+  isolated: boolean // game-thread isolation (boost sub-switch) currently applied
+  isolateDetail: string // where the threads went, or why it could not be done
+}
+
+// Mirrors capture.animMaskEvent: whether "hide others' skill animations" is
+// rewriting casts right now, and if not, why it is paused.
+export interface AnimMaskState {
+  armed: boolean
+  lockId: number
+  reason: 'armed' | 'idle' | 'no-identity'
 }
 
 interface CaptureBackend {
@@ -31,6 +41,8 @@ interface CaptureBackend {
   SetCharacterNames(names: string[]): Promise<void>
   SetCasterFilter(id: number): Promise<void>
   SetGameBoost(enabled: boolean): Promise<GameBoostState>
+  SetGameThreadIsolation(on: boolean): Promise<GameBoostState>
+  SetAnimMask(on: boolean): Promise<void>
   IsCapturing(): Promise<boolean>
 }
 
@@ -76,6 +88,16 @@ export async function setCasterFilter(id: number): Promise<void> {
 export async function setGameBoost(enabled: boolean): Promise<GameBoostState | undefined> {
   const b = backend()
   return b ? b.SetGameBoost(enabled) : undefined
+}
+
+export async function setGameThreadIsolation(on: boolean): Promise<GameBoostState | undefined> {
+  const b = backend()
+  return b ? b.SetGameThreadIsolation(on) : undefined
+}
+
+export async function setAnimMask(on: boolean): Promise<void> {
+  const b = backend()
+  if (b) await b.SetAnimMask(on)
 }
 
 export async function isCapturing(): Promise<boolean> {

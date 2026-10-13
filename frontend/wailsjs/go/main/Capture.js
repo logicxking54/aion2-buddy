@@ -6,6 +6,10 @@ export function IsCapturing() {
   return window['go']['main']['Capture']['IsCapturing']();
 }
 
+export function SetAnimMask(arg1) {
+  return window['go']['main']['Capture']['SetAnimMask'](arg1);
+}
+
 export function SetCasterFilter(arg1) {
   return window['go']['main']['Capture']['SetCasterFilter'](arg1);
 }
@@ -20,6 +24,10 @@ export function SetCharacterNames(arg1) {
 
 export function SetGameBoost(arg1) {
   return window['go']['main']['Capture']['SetGameBoost'](arg1);
+}
+
+export function SetGameThreadIsolation(arg1) {
+  return window['go']['main']['Capture']['SetGameThreadIsolation'](arg1);
 }
 
 export function StartCapture(arg1) {

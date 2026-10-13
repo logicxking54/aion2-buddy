@@ -56,11 +56,29 @@ func (c *Capture) watchGame() {
 	}
 }
 
+// SetAnimMask turns the "hide other players' skill animations" packet rewrite
+// on or off. It only acts while capture is running and your caster is known.
+func (c *Capture) SetAnimMask(on bool) {
+	c.engine.SetAnimMask(on)
+}
+
 // SetGameBoost turns the game-process boost on or off: High priority and
 // performance-core affinity for Aion2.exe while it runs. Off restores whatever
 // the game had before this app changed it.
 func (c *Capture) SetGameBoost(enabled bool) capture.GameBoostState {
 	st := c.boost.SetEnabled(enabled, capture.GamePID())
+	if c.ctx != nil {
+		runtime.EventsEmit(c.ctx, "game:boost", st)
+	}
+	return st
+}
+
+// SetGameThreadIsolation is the boost's sub-switch: keep the game's main thread
+// alone on one core, and every other game thread (plus this app) off that
+// core, while the boost is applied. Off puts the threads back on the process's
+// own cores.
+func (c *Capture) SetGameThreadIsolation(on bool) capture.GameBoostState {
+	st := c.boost.SetThreadIsolation(on, capture.GamePID())
 	if c.ctx != nil {
 		runtime.EventsEmit(c.ctx, "game:boost", st)
 	}

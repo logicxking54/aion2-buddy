@@ -192,8 +192,9 @@ type Engine struct {
 	maskOn          bool              // FPS mask: rewrite other players' cast skill_id to Dodge
 	maskKeep        uint64            // your caster (entity key) left untouched; 0 = not locked yet
 	maskDodge       uint32            // skill_id written over masked casts (a no-VFX Dodge id)
-	animMaskOn      bool              // "disable skill anims except mine": rewrite non-edit-list, non-own casts
-	animMaskID      uint32            // skill_id written over anim-masked casts (a tiny no-anim skill)
+	animMaskOn      bool              // "hide others' skill anims": rewrite every non-own player cast to that class's dodge
+	animMaskArmed   bool              // last armed state reported to the UI (packet goroutine only)
+	animMaskLock    uint64            // the lock that state was reported for
 	autoCaster      uint64            // local caster from the authoritative 33 36 self-identity record
 	autoCasterName  string            // local character name carried by the same identity record
 	autoProvisional bool              // true when first configured ACT supplied a best-effort fallback
@@ -240,7 +241,6 @@ func NewEngine(emit func(event string, payload any)) *Engine {
 		lastReqPkt:    map[int][]byte{},
 		autoBase:      6800,
 		autoPerMs:     80,
-		animMaskID:    17000101, // default no-animation skill for the anim mask
 	}
 	return e
 }
@@ -351,31 +351,75 @@ func (e *Engine) SetCasterMask(on bool, keepCaster uint64, dodgeID uint32) {
 	}
 }
 
-// SetAnimMask toggles the "disable skill animations (except mine)" mod. When on
-// AND your caster is known, every inbound cast that is from a
-// DIFFERENT caster AND is NOT one of your configured (edit-list) skills has its
-// main skill_id overwritten with replaceID — a tiny no-animation skill — so the
-// client renders a quick dash instead of that cast. Your own casts and edit-list
-// skills (any caster) keep their real animation. Same-length in-place edit, so the
-// TCP stream never desyncs; nothing happens until your caster is locked. Works on
-// both plaintext and LZ4-compressed (party) casts. replaceID == 0 keeps the
-// current id (default 17000101).
-func (e *Engine) SetAnimMask(on bool, replaceID uint32) {
+// SetAnimMask toggles the "hide other players' skill animations" mod. When on
+// AND your caster is known, every inbound player cast from a DIFFERENT caster
+// has its skill_id overwritten with that caster's class dodge (dodgeFor), so the
+// client plays a quick dodge instead of the real skill and never spawns its
+// animation or effects. Your own casts keep their real id. Monster and boss
+// casts are never touched (their ids are outside the player-class range).
+// Same-length in-place edit, so the TCP stream never desyncs; nothing happens
+// until your caster is locked. Works on both plaintext and LZ4-compressed
+// (party) casts, and only while capture is running.
+func (e *Engine) SetAnimMask(on bool) {
 	e.mu.Lock()
 	was := e.animMaskOn
 	e.animMaskOn = on
-	if replaceID != 0 {
-		e.animMaskID = replaceID
-	}
-	id := e.animMaskID
 	e.mu.Unlock()
 
 	switch {
 	case on && !was:
-		e.emitLog(fmt.Sprintf("Skill-anim mask ON — others' non-edit-list casts -> skill %d (your casts + edit-list kept)", id))
+		e.emitLog("Skill-anim mask ON — other players' casts play as their class dodge (your casts kept)")
 	case !on && was:
 		e.emitLog("Skill-anim mask OFF")
 	}
+}
+
+// animMaskEvent tells the UI whether the skill-animation mask is rewriting
+// casts right now and, if not, why it is paused.
+type animMaskEvent struct {
+	Armed  bool   `json:"armed"`
+	LockID uint64 `json:"lockId"`
+	Reason string `json:"reason"` // "armed" | "idle" (lock silent) | "no-identity"
+}
+
+// animMaskTarget decides whether a player cast from caster may be rewritten to
+// its class dodge. The mask is armed only while the locked caster has cast a
+// configured skill within animMaskArmWindow (see the constant), and a caster
+// bound to the configured character name is never a target whatever the lock
+// says. Runs on the packet goroutine, the only writer of actSeen.
+func (e *Engine) animMaskTarget(on bool, lock, caster uint64, filtering bool, now int64) bool {
+	if !on {
+		return false
+	}
+	armed := false
+	if lock != 0 {
+		last, seen := e.actSeen[lock]
+		armed = seen && now-last <= int64(animMaskArmWindow)
+	}
+	e.setAnimMaskArmed(armed, lock)
+	if !armed || caster == 0 || caster == lock {
+		return false
+	}
+	if filtering && e.tracker.isMine(caster) {
+		return false
+	}
+	return true
+}
+
+// setAnimMaskArmed reports arm/pause transitions to the UI, once per change.
+func (e *Engine) setAnimMaskArmed(armed bool, lock uint64) {
+	if armed == e.animMaskArmed && lock == e.animMaskLock {
+		return
+	}
+	e.animMaskArmed, e.animMaskLock = armed, lock
+	reason := "no-identity"
+	switch {
+	case armed:
+		reason = "armed"
+	case lock != 0:
+		reason = "idle"
+	}
+	e.fire("capture:anim-mask", animMaskEvent{Armed: armed, LockID: lock, Reason: reason})
 }
 
 // SetCasterFilter sets the manual caster override. A non-zero id always wins over
@@ -410,6 +454,14 @@ const (
 	// Entity keys are re-assigned when entering a new instance, so stale choices
 	// must not accumulate indefinitely.
 	actCasterTTL = 90 * time.Second
+
+	// "Hide others' skill animations" rewrites other players' casts only while
+	// the locked caster has itself cast a configured skill this recently. Entity
+	// ids are re-assigned on every instance entry, so a lock carried over from
+	// the previous instance never casts again; without this proof of life the
+	// mask would turn the player's OWN casts into dodges (the player could only
+	// dash, and could not cast a configured skill to be re-identified).
+	animMaskArmWindow = 20 * time.Second
 
 	// A previously unseen configured-skill caster after a quiet period marks a
 	// new instance generation when the authoritative identity record was missed.
@@ -452,6 +504,7 @@ func (e *Engine) resetCasterState() {
 	e.casterFilter = 0
 	e.actorNames = map[uint64]string{}
 	e.actSeen = map[uint64]int64{}
+	e.animMaskArmed, e.animMaskLock = false, 0
 }
 
 // acceptLocalIdentity makes the 33 36 self record the automatic caster source.
@@ -1227,7 +1280,7 @@ func (e *Engine) editCompressedCasts(
 	scanIDs map[uint32]struct{}, scanFB map[byte]struct{},
 	lookup map[uint32]skillCfg, idToName map[uint32]string,
 	filtering, autoMode bool, autoBase, autoPerMs float64,
-	animMaskOn bool, animMaskID uint32,
+	animMaskOn bool,
 ) (handled, edited bool) {
 	blockStart, origLen, ok := parseLZ4Frame(payload)
 	if !ok {
@@ -1252,28 +1305,29 @@ func (e *Engine) editCompressedCasts(
 			continue // only 0x02 ACT casts carry the position+speed block
 		}
 		caster := extractEntityKey(clean, hh.offset)
+		now := time.Now().UnixNano()
 		// Track configured-skill ACT casters for the picker and the provisional
 		// instance-generation fallback when an identity record was missed.
 		if caster != 0 {
 			if _, conf := lookup[hh.id]; conf {
-				now := time.Now().UnixNano()
 				casterFilter = e.observeConfiguredCaster(caster, now)
 				e.recordActCaster(caster, now)
 				filtering = e.tracker.hasAnyKeys()
 			}
 		}
 
-		// "Disable skill animations (except mine)" in compressed (party) casts: rewrite
-		// a known other caster's non-edit-list cast skill_id to the no-anim skill,
-		// mapping the 4 id bytes back into the LZ4 block literals (length-preserving).
-		// Unreachable when any id byte is an LZ4 back-reference match (rare). Your own
-		// casts and edit-list skills are left untouched. Runs before the config filter.
-		if animMaskOn && casterFilter != 0 && caster != 0 && caster != casterFilter {
-			if _, inEdit := lookup[hh.id]; !inEdit {
-				if animMaskID != 0 && hh.offset+4 <= len(clean) &&
-					binary.LittleEndian.Uint32(clean[hh.offset:hh.offset+4]) != animMaskID {
+		// "Hide other players' skill animations" in compressed (party) casts: rewrite
+		// another caster's player cast skill_id to that class's dodge, mapping the 4
+		// id bytes back into the LZ4 block literals (length-preserving). Unreachable
+		// when any id byte is an LZ4 back-reference match (rare). Armed only while
+		// the locked caster is itself casting (animMaskTarget); your own casts and
+		// non-player (boss) ids are left untouched. Runs before the config filter.
+		if e.animMaskTarget(animMaskOn, casterFilter, caster, filtering, now) {
+			if dodge := dodgeFor(hh.id); dodge != 0 {
+				if hh.offset+4 <= len(clean) &&
+					binary.LittleEndian.Uint32(clean[hh.offset:hh.offset+4]) != dodge {
 					var b [4]byte
-					binary.LittleEndian.PutUint32(b[:], animMaskID)
+					binary.LittleEndian.PutUint32(b[:], dodge)
 					reachable := true
 					for k := 0; k < 4; k++ {
 						if hh.offset+k >= len(litSrc) || litSrc[hh.offset+k] < 0 {
@@ -1289,7 +1343,7 @@ func (e *Engine) editCompressedCasts(
 						e.countModify()
 					}
 				}
-				continue // other player's non-edit-list cast anim-masked
+				continue // other player's cast now plays as their class dodge
 			}
 		}
 
@@ -1420,7 +1474,6 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	maskKeep := e.maskKeep
 	maskDodge := e.maskDodge
 	animMaskOn := e.animMaskOn
-	animMaskID := e.animMaskID
 	sessionCh := e.sessionCh
 	e.mu.Unlock()
 
@@ -1552,7 +1605,7 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 	if lz4DecompressEdit && !maskOn {
 		if handled, ed := e.editCompressedCasts(raw, payload, payloadOffset,
 			scanIDs, scanFB, lookup, idToName, filtering, autoMode, autoBase, autoPerMs,
-			animMaskOn, animMaskID); handled {
+			animMaskOn); handled {
 			if ed {
 				modified = true
 			}
@@ -1632,23 +1685,22 @@ func (e *Engine) processPacket(raw []byte, addr *Address, h handle) {
 			continue // other player's cast masked; skip our own-cast processing
 		}
 
-		// "Disable skill animations (except mine)": rewrite the cast skill_id of any
-		// cast from a KNOWN other caster that is NOT one of your configured (edit-list)
-		// skills to a tiny no-animation skill, so the client shows a quick dash for it
-		// instead of the full cast. Your own casts (caster == casterFilter) and
-		// edit-list skills (any caster) keep their animation. Same-length in-place edit;
-		// armed only once your caster is locked. Runs BEFORE the caster filter below
-		// (which drops other casters), because masked casts are exactly other casters'.
-		if animMaskOn && casterFilter != 0 && caster != 0 && caster != casterFilter {
-			if _, inEdit := lookup[hh.id]; !inEdit {
-				if animMaskID != 0 && hh.offset+4 <= len(payload) {
-					if orig := binary.LittleEndian.Uint32(payload[hh.offset : hh.offset+4]); orig != animMaskID {
-						binary.LittleEndian.PutUint32(raw[payloadOffset+hh.offset:payloadOffset+hh.offset+4], animMaskID)
-						modified = true
-						e.countModify()
-					}
+		// "Hide other players' skill animations": rewrite the cast skill_id of any
+		// player cast from a KNOWN other caster to that class's dodge, so the client
+		// shows a quick dodge instead of the full cast and spawns none of its effects.
+		// Your own casts (caster == casterFilter) keep their animation; non-player ids
+		// (bosses, monsters) are never rewritten. Same-length in-place edit; armed only
+		// while your locked caster is itself casting (animMaskTarget). Runs BEFORE the
+		// caster filter below (which drops other casters), because masked casts are
+		// exactly other casters'.
+		if e.animMaskTarget(animMaskOn, casterFilter, caster, filtering, now) {
+			if dodge := dodgeFor(hh.id); dodge != 0 && hh.offset+4 <= len(payload) {
+				if orig := binary.LittleEndian.Uint32(payload[hh.offset : hh.offset+4]); orig != dodge {
+					binary.LittleEndian.PutUint32(raw[payloadOffset+hh.offset:payloadOffset+hh.offset+4], dodge)
+					modified = true
+					e.countModify()
 				}
-				continue // other player's non-edit-list cast anim-masked
+				continue // other player's cast now plays as their class dodge
 			}
 		}
 

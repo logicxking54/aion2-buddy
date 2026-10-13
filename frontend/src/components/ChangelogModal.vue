@@ -20,6 +20,22 @@ interface Release {
 }
 const releases: Release[] = [
   {
+    version: '1.2.21',
+    changes: [
+      { en: 'New sub-switch under Game boost: "Game thread on its own core (experimental)". While the boost is applied, the game\'s main thread (UE GameThread) is pinned to one CPU of the last core and every other game thread, plus this app, is kept off that core, so a burst of worker threads never shares its core. Re-checked every few seconds for threads the game creates later; off puts every thread back.', th: 'เพิ่มสวิตช์ย่อยใต้บูสต์เกม: "แยก GameThread ไว้คอร์เดียว (ทดลอง)" ขณะบูสต์ทำงาน เธรดหลักของเกม (UE GameThread) จะถูกล็อกไว้บน CPU เดียวของคอร์สุดท้าย และกันเธรดอื่นของเกมกับแอปนี้ออกจากคอร์นั้น เธรดงานที่ตื่นพร้อมกันจะไม่มาแชร์คอร์อีก ตรวจซ้ำทุกไม่กี่วินาทีสำหรับเธรดที่เกมสร้างทีหลัง ปิดแล้วทุกเธรดกลับเป็นเดิม', zh: '遊戲加速下新增子開關：「遊戲主執行緒獨占核心（實驗）」。加速生效時，遊戲主執行緒（UE GameThread）會固定在最後一個核心的單一 CPU，遊戲的其他執行緒與本程式則避開該核心，工作執行緒突然喚醒時不會再與它共用核心。每隔幾秒會重新檢查遊戲稍後建立的執行緒；關閉後所有執行緒還原。' },
+      { en: 'The status line reports where the threads went (e.g. "GameThread → CPU 14, 60 threads → CPU 0-13") or why the game refused.', th: 'บรรทัดสถานะบอกว่าเธรดไปอยู่ที่ไหน (เช่น "GameThread → CPU 14, 60 threads → CPU 0-13") หรือเหตุผลที่ทำไม่ได้', zh: '狀態列會顯示執行緒的去向（例如「GameThread → CPU 14, 60 threads → CPU 0-13」）或遊戲拒絕的原因。' },
+      { en: '"Hide others\' skill animations" is now armed only while your locked caster has cast a configured skill within the last 20 s. Entity ids change on every instance entry, so a lock left over from the previous run used to turn your own casts into dodges (you could only dash, and could never re-lock). The mask now pauses instead, your casts play normally, and its status line says why it is paused.', th: '"ซ่อนท่าสกิลของคนอื่น" จะทำงานเฉพาะตอนที่ caster ที่ล็อกไว้กดสกิลที่ตั้งไว้ภายใน 20 วินาทีล่าสุด เพราะ ID ตัวละครเปลี่ยนทุกครั้งที่เข้าดัน ล็อกเก่าที่ค้างจากรอบก่อนเคยทำให้ท่าของคุณเองกลายเป็น dodge (ได้แต่แดช และล็อกใหม่ไม่ได้) ตอนนี้จะพักการซ่อนแทน ท่าของคุณเล่นปกติ และบรรทัดสถานะบอกเหตุผลที่พัก', zh: '「隱藏其他玩家的技能動作」現在只在你鎖定的施法者於最近 20 秒內施放過已設定技能時才生效。每次進入副本角色 ID 都會改變，先前殘留的鎖定會把你自己的施法變成閃避（只能衝刺、也無法重新鎖定）。現在改為暫停遮蔽，你的施法正常播放，狀態列會說明暫停原因。' },
+      { en: 'Casts from the character bound to your configured name are never masked, whatever the caster lock says.', th: 'ท่าของตัวละครที่ผูกกับชื่อที่คุณตั้งไว้จะไม่ถูกซ่อนเด็ดขาด ไม่ว่าล็อก caster จะชี้ไปที่ใคร', zh: '與你設定名稱綁定的角色，其施法永遠不會被遮蔽，無論施法者鎖定指向誰。' },
+    ],
+  },
+  {
+    version: '1.2.20',
+    changes: [
+      { en: 'New "Hide others\' skill animations" switch in Ping Maker: while capture runs, every other player\'s cast packet is rewritten to that player\'s class dodge, so their skill animations and effects never play on your client. Your own casts keep their animation; bosses and monsters are never touched.', th: 'เพิ่มสวิตช์ "ซ่อนท่าสกิลของคนอื่น" ใน Ping Maker: ขณะดักแพ็กเก็ต คาสต์ของผู้เล่นคนอื่นทุกคนจะถูกเปลี่ยนเป็นท่า dodge ของอาชีพนั้น ท่าและเอฟเฟคสกิลของเขาจะไม่เล่นบนเครื่องคุณ ของคุณเองยังปกติ บอส/มอนสเตอร์ไม่ถูกแตะ', zh: 'Ping Maker 新增「隱藏其他玩家的技能動作」開關：擷取執行時，其他玩家的每個施法封包都會改寫為該職業的閃避動作，技能動作與特效不會在你的客戶端播放。你自己的施法保持原樣，首領與怪物不受影響。' },
+      { en: 'The rewrite now uses each class\'s own dodge id (11000101 … 18000101) instead of one fixed id, so every class animates correctly.', th: 'การเปลี่ยน id ใช้ท่า dodge ของแต่ละอาชีพ (11000101 … 18000101) แทน id เดียวแบบเดิม ทุกอาชีพจึงแสดงถูกต้อง', zh: '改寫現在使用各職業自己的閃避 id（11000101 … 18000101），而非單一固定 id，所有職業都能正確播放。' },
+    ],
+  },
+  {
     version: '1.2.19',
     changes: [
       { en: 'New "Game boost" switch in Ping Maker: while Aion2.exe is running it is kept at High priority and pinned to the performance cores (P-cores on hybrid Intel CPUs; the affinity is left alone on CPUs without efficiency cores). Switching it off restores the process to what it had before.', th: 'เพิ่มสวิตช์ "บูสต์เกม" ใน Ping Maker: ขณะ Aion2.exe เปิดอยู่ แอพจะคง priority High และล็อกเกมไว้บน P-core (CPU ที่ไม่มี E-core จะไม่เปลี่ยน affinity) ปิดสวิตช์แล้วโปรเซสจะกลับเป็นค่าเดิม', zh: 'Ping Maker 新增「遊戲加速」開關：Aion2.exe 執行時會維持高優先權並固定在效能核心（混合架構 Intel CPU 的 P-core；沒有效率核心的 CPU 不變更親和性）。關閉後會還原先前的設定。' },

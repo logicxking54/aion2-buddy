@@ -19,6 +19,8 @@ export namespace capture {
 	    applied: boolean;
 	    pid: number;
 	    detail: string;
+	    isolated: boolean;
+	    isolateDetail: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new GameBoostState(source);
@@ -30,6 +32,8 @@ export namespace capture {
 	        this.applied = source["applied"];
 	        this.pid = source["pid"];
 	        this.detail = source["detail"];
+	        this.isolated = source["isolated"];
+	        this.isolateDetail = source["isolateDetail"];
 	    }
 	}
 	export class SkillSpeed {

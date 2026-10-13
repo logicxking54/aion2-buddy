@@ -73,7 +73,7 @@ func TestCompressedIdentitySkipsOtherNameBeforeConfiguredCharacter(t *testing.T)
 	payload := append([]byte{byte(len(clean) + 8), 0xff, 0xff, byte(len(clean)), 0, 0, 0, 0xf0, byte(len(clean) - 15)}, clean...)
 	e := NewEngine(func(string, any) {})
 	e.SetCharacterNames([]string{"Maliwan"})
-	handled, edited := e.editCompressedCasts(payload, payload, 0, nil, nil, nil, nil, false, false, 0, 0, false, 0)
+	handled, edited := e.editCompressedCasts(payload, payload, 0, nil, nil, nil, nil, false, false, 0, 0, false)
 	if !handled || edited {
 		t.Fatalf("identity-only packet: handled=%t edited=%t", handled, edited)
 	}

@@ -21,6 +21,16 @@ Menus live under `frontend/src/projects/`, registered in `registry.ts`:
     every game packet, so scheduling delay there is player latency. End-to-end check:
     `BOOSTTEST=1 go test ./internal/capture -run Manual -v` (uses a throwaway `ping`
     process, not the game).
+    - Sub-switch **game-thread isolation** (`isolate.go`, `Capture.SetGameThreadIsolation`,
+      `config.gameThreadIsolate`): the UE `GameThread` (found by thread description, else
+      the earliest-created thread) is pinned to one CPU of the LAST usable core, every
+      other game thread and this app are pinned off that core (sibling left empty), and
+      the sweep re-runs on every 3 s watcher tick because new threads inherit the process
+      mask. Plain `SetThreadAffinityMask` through `THREAD_SET_INFORMATION`, no injection.
+      Thread masks are restored BEFORE the process mask on disable (a process-mask change
+      resets thread masks). A process that refuses thread access is not retried until it
+      restarts. The game is GameThread-bound (~0.9 core); this buys frame-time consistency,
+      not fps.
 - **Mod** (`internal/gamemod`) — reversible toggles:
   - File/system tweaks (remove intro video, TCP latency, NIC tuning) — writes game files
     and system settings, with backups for rollback.
@@ -30,6 +40,12 @@ Menus live under `frontend/src/projects/`, registered in `registry.ts`:
     publishing steps: `tools/effect-mod/README.md`.
   - **Disable other players' skill animations** (`config.animMask`) — not a file mod: a
     live capture-engine packet rewrite, so it only applies while capture is running.
+    **Armed only while the locked caster has cast a configured skill within
+    `animMaskArmWindow` (20 s)** (`Engine.animMaskTarget`): entity ids are re-assigned on
+    every instance entry, and a lock left over from the previous run used to rewrite the
+    player's OWN casts to dodges (only dashing, no re-lock possible). A caster the tracker
+    binds to the configured name is never masked. `capture:anim-mask` reports
+    armed/idle/no-identity to the UI status line.
   - **Performance Config** (`perfconfig_windows.go`) — max-FPS cvar block appended to the
     game's user `Engine.ini` (`%LOCALAPPDATA%\AION2\Saved*\Config\Windows`) between marker
     comments; revert strips the block. The updater resets the ini every patch, so the

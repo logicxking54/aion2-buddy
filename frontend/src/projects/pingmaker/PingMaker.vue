@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { classes, skills, skillColor, type Skill, type SkillClass } from './skills'
 import errorImage from '../../assets/images/skill-error.svg'
 import { config, loadConfig, saveConfig } from '../../config'
-import { actCasters, gameBoost, localCaster, pickCaster } from '../../captureController'
+import { actCasters, animMaskState, gameBoost, localCaster, pickCaster, running } from '../../captureController'
 
 const { t } = useI18n()
 
@@ -21,6 +21,36 @@ const boostStatus = computed(() => {
   if (s.applied) return t('ping.gameBoostApplied', { detail: s.detail })
   if (s.detail) return t('ping.gameBoostFailed', { detail: s.detail })
   return t('ping.gameBoostWaiting')
+})
+
+// Game-thread isolation: a sub-switch of the boost (the backend only pins
+// threads while the boost is applied). The status line shows where the threads
+// went, or why the game refused.
+function setIsolate(on: boolean) {
+  config.gameThreadIsolate = on
+  saveConfig()
+}
+const isolateStatus = computed(() => {
+  if (!config.gameBoost || !config.gameThreadIsolate) return t('ping.gameThreadIsolateOff')
+  const s = gameBoost.value
+  if (s.isolated) return t('ping.gameThreadIsolateOn', { detail: s.isolateDetail })
+  if (s.isolateDetail) return t('ping.gameThreadIsolateFailed', { detail: s.isolateDetail })
+  return s.applied ? t('ping.gameThreadIsolateWaiting') : t('ping.gameBoostWaiting')
+})
+
+// Others' skill animations: a packet rewrite inside the capture engine, so the
+// toggle is persisted but only takes effect while capture is running.
+function setAnimMaskToggle(on: boolean) {
+  config.animMask = on
+  saveConfig()
+}
+const animMaskStatus = computed(() => {
+  if (!config.animMask) return t('ping.animMaskOff')
+  if (!running.value) return t('ping.animMaskIdle')
+  const s = animMaskState.value
+  if (s.armed) return t('ping.animMaskArmed', { id: s.lockId })
+  if (s.reason === 'idle') return t('ping.animMaskWaitingCast', { id: s.lockId })
+  return t('ping.animMaskNoIdentity')
 })
 const casterChoices = computed(() => {
   const choices = [...actCasters.value]
@@ -282,6 +312,51 @@ onMounted(async () => {
         />
         <span>{{ t('ping.gameBoost') }}</span>
         <span class="ml-auto truncate text-[11px] font-normal">{{ boostStatus }}</span>
+      </label>
+
+      <!-- Boost sub-switch: the game's main thread alone on one core, every
+           other game thread and this app kept off it. Needs the boost. -->
+      <label
+        :title="t('ping.gameThreadIsolateHint')"
+        class="mt-1 ml-5 flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold"
+        :class="[
+          config.gameBoost ? 'cursor-pointer' : 'cursor-not-allowed opacity-50',
+          config.gameBoost && config.gameThreadIsolate && gameBoost.isolated
+            ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200'
+            : config.gameBoost && config.gameThreadIsolate && gameBoost.isolateDetail
+              ? 'border-amber-400/30 bg-amber-400/10 text-amber-200'
+              : 'border-white/5 bg-ink-800 text-slate-400',
+        ]"
+      >
+        <input
+          type="checkbox"
+          :checked="config.gameThreadIsolate"
+          :disabled="!config.gameBoost"
+          @change="setIsolate(($event.target as HTMLInputElement).checked)"
+          class="h-4 w-4 accent-accent"
+        />
+        <span>{{ t('ping.gameThreadIsolate') }}</span>
+        <span class="ml-auto truncate text-[11px] font-normal">{{ isolateStatus }}</span>
+      </label>
+
+      <!-- Others' skill animations: rewrite their cast packets to their class dodge. -->
+      <label
+        :title="t('ping.animMaskHint')"
+        class="mt-2 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold"
+        :class="config.animMask && running && animMaskState.armed
+          ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200'
+          : config.animMask
+            ? 'border-amber-400/30 bg-amber-400/10 text-amber-200'
+            : 'border-white/5 bg-ink-800 text-slate-400'"
+      >
+        <input
+          type="checkbox"
+          :checked="config.animMask"
+          @change="setAnimMaskToggle(($event.target as HTMLInputElement).checked)"
+          class="h-4 w-4 accent-accent"
+        />
+        <span>{{ t('ping.animMask') }}</span>
+        <span class="ml-auto truncate text-[11px] font-normal">{{ animMaskStatus }}</span>
       </label>
 
       <!-- Search added skills -->

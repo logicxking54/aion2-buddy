@@ -109,4 +109,9 @@ type GameBoostState struct {
 	Applied bool   `json:"applied"`
 	PID     uint32 `json:"pid"`
 	Detail  string `json:"detail"`
+	// Game-thread isolation (a sub-switch of the boost): whether the game
+	// thread currently sits alone on its core, and either where everything went
+	// or why it could not be done.
+	Isolated      bool   `json:"isolated"`
+	IsolateDetail string `json:"isolateDetail"`
 }

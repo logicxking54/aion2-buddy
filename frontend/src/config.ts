@@ -17,6 +17,8 @@ export interface AppConfig {
   casterRecord: number // manual caster override — RUNTIME ONLY; 0 uses authoritative auto identity
   panelHeight: number
   gameBoost: boolean // keep Aion2.exe at High priority on the performance cores while it runs
+  gameThreadIsolate: boolean // boost sub-switch: the game's main thread alone on one core
+  animMask: boolean // rewrite other players' casts to their class's dodge while capture runs
   rows: SavedRow[]
 }
 
@@ -34,6 +36,8 @@ export const config = reactive<AppConfig>({
   casterRecord: 0,
   panelHeight: 300,
   gameBoost: false,
+  gameThreadIsolate: false,
+  animMask: false,
   rows: [],
 })
 

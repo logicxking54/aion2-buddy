@@ -17,9 +17,12 @@ func TestPingMakerOnlyBindings(t *testing.T) {
 		typ  reflect.Type
 		want []string
 	}{
-		// SetGameBoost is the one non-capture capability: it only touches process
-		// priority/affinity for Aion2.exe and this app, nothing in the game files.
-		{"Capture", reflect.TypeOf((*Capture)(nil)), []string{"IsCapturing", "SetCasterFilter", "SetCatalog", "SetCharacterNames", "SetGameBoost", "StartCapture", "StopCapture", "UpdateCapture"}},
+		// SetGameBoost and its sub-switch SetGameThreadIsolation are the one
+		// non-capture capability: they only touch process/thread priority and
+		// affinity for Aion2.exe and this app, nothing in the game files.
+		// SetAnimMask is a packet rewrite inside the capture engine (others' casts
+		// play as their class dodge), so it belongs to the Ping Maker surface.
+		{"Capture", reflect.TypeOf((*Capture)(nil)), []string{"IsCapturing", "SetAnimMask", "SetCasterFilter", "SetCatalog", "SetCharacterNames", "SetGameBoost", "SetGameThreadIsolation", "StartCapture", "StopCapture", "UpdateCapture"}},
 		{"App", reflect.TypeOf((*App)(nil)), []string{"LoadConfig", "SaveConfig"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
